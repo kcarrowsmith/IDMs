@@ -1,0 +1,1253 @@
+---
+title: "IDM Future Climates"
+author: "Kaysee Arrowsmith"
+output: html_document
+---
+
+# Load Packages
+
+```{r packages, message = F}
+options(java.parameters = "- Xmx1024m")
+library(knitr)
+library(tidyverse)
+library(raster)
+library(geodata)
+library(ENMTools)
+library(predicts)
+library(rJava)
+
+theme_set(theme_light() +
+            theme(text = element_text(size = 20)))
+```
+
+# Load Data
+
+```{r data}
+bbna <- read.csv("bbna_pnwbba.csv", stringsAsFactors = F)
+gbif <- read_tsv("gbif-top5.csv") %>%
+  filter(year >= 2018)
+```
+
+# WorldClim Data
+
+I'm cropping all of these predictor rasters to the extreme points of my GBIF data.
+
+```{r worldclim, message = F}
+bioclim <- crop(worldclim_global(var = "bio", 
+                               res = 2.5, 
+                               path = getwd()),
+                ext(-130, -110, 40, 50))
+```
+
+```{r cmip}
+cmip.df <- data.frame(time = c(rep("2021-2040", 50), 
+                               rep("2061-2080", 50)),
+                      ssp = c(rep("245", 25), 
+                              rep("585", 25), 
+                              rep("245", 25), 
+                              rep("585", 25)),
+                      model = rep(c("ACCESS-CM2", 
+                                    "ACCESS-ESM1-5", 
+                                    "AWI-CM-1-1-MR", 
+                                    "BCC-CSM2-MR", 
+                                    "CanESM5", 
+                                    "CanESM5-CanOE", 
+                                    "CMCC-ESM2", 
+                                    "CNRM-CM6-1", 
+                                    "CNRM-CM6-1-HR", 
+                                    "CNRM-ESM2-1", 
+                                    "EC-Earth3-Veg", 
+                                    "EC-Earth3-Veg-LR", 
+                                    "FIO-ESM-2-0", 
+                                    "GISS-E2-1-G", 
+                                    "GISS-E2-1-H", 
+                                    "HadGEM3-GC31-LL", 
+                                    "INM-CM4-8", 
+                                    "INM-CM5-0", 
+                                    "IPSL-CM6A-LR", 
+                                    "MIROC-ES2L", 
+                                    "MIROC6", 
+                                    "MPI-ESM1-2-HR", 
+                                    "MPI-ESM1-2-LR", 
+                                    "MRI-ESM2-0", 
+                                    "UKESM1-0-LL"), 4))
+```
+
+
+# Re-Build Models
+
+I don't need to bootstrap or evaluate here. I just need to build the base models for each interaction in order to run the prediction.
+
+Since flower-by-bee is never useful, I'm not going to build it at all.
+
+## B. bifarius
+### Chamaenerion
+```{r bifcham models}
+gbif.cham <- gbif %>%
+  filter(genus == "Chamaenerion")
+
+bifcham <- bbna %>%
+  filter(species == "bifarius",
+         plant.host.genus == "Chamaenerion") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  bif.longlat <- bbna %>%
+    filter(species == "bifarius",
+           plant.host.genus != "Chamaenerion") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bif.fold <- kfold(bif.longlat, k = 5)
+  bif.test <- bif.longlat[bif.fold == 1,]
+  bif.train <- bif.longlat[bif.fold != 1,]
+  
+  cham.longlat <- gbif.cham %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cham.fold <- kfold(cham.longlat, k = 5)
+  cham.test <- cham.longlat[cham.fold == 1,]
+  cham.train <- cham.longlat[cham.fold != 1,]
+  
+  bifcham.longlat <- bifcham %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bifcham.fold <- kfold(bifcham.longlat, k = 5)
+  bifcham.test <- bifcham.longlat[bifcham.fold == 1,]
+  bifcham.train <- bifcham.longlat[bifcham.fold != 1,]
+  
+  cham.maxent <- maxent(x = stack(bioclim), 
+                       p = cham.train, 
+                       a = bg.train)
+  cham.predict <- dismo::predict(cham.maxent,
+                                stack(bioclim))
+  
+  bif.by.cham <- maxent(x = stack(stack(bioclim), cham.predict),
+                       p = bif.train,
+                       a = bg.train)
+  
+  bifcham.maxent <- maxent(x = stack(bioclim), 
+                          p = bifcham.train, 
+                          a = bg.train)
+```
+
+
+### Cirsium
+```{r bifcir models}
+gbif.cir <- gbif %>%
+  filter(genus == "Cirsium")
+
+bifcir <- bbna %>%
+  filter(species == "bifarius",
+         plant.host.genus == "Cirsium") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  bif.longlat <- bbna %>%
+    filter(species == "bifarius",
+           plant.host.genus != "Cirsium") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bif.fold <- kfold(bif.longlat, k = 5)
+  bif.test <- bif.longlat[bif.fold == 1,]
+  bif.train <- bif.longlat[bif.fold != 1,]
+  
+  cir.longlat <- gbif.cir %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cir.fold <- kfold(cir.longlat, k = 5)
+  cir.test <- cir.longlat[cir.fold == 1,]
+  cir.train <- cir.longlat[cir.fold != 1,]
+  
+  bifcir.longlat <- bifcir %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bifcir.fold <- kfold(bifcir.longlat, k = 5)
+  bifcir.test <- bifcir.longlat[bifcir.fold == 1,]
+  bifcir.train <- bifcir.longlat[bifcir.fold != 1,]
+  
+  cir.maxent <- maxent(x = stack(bioclim), 
+                       p = cir.train, 
+                       a = bg.train)
+  cir.predict <- dismo::predict(cir.maxent,
+                                stack(bioclim))
+  
+  bif.by.cir <- maxent(x = stack(stack(bioclim), cir.predict),
+                       p = bif.train,
+                       a = bg.train)
+  
+  bifcir.maxent <- maxent(x = stack(bioclim), 
+                          p = bifcir.train, 
+                          a = bg.train)
+```
+
+### Lupinus
+```{r biflup models}
+gbif.lup <- gbif %>%
+  filter(genus == "Lupinus")
+
+biflup <- bbna %>%
+  filter(species == "bifarius",
+         plant.host.genus == "Lupinus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  bif.longlat <- bbna %>%
+    filter(species == "bifarius",
+           plant.host.genus != "Lupinus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bif.fold <- kfold(bif.longlat, k = 5)
+  bif.test <- bif.longlat[bif.fold == 1,]
+  bif.train <- bif.longlat[bif.fold != 1,]
+  
+  lup.longlat <- gbif.lup %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  lup.fold <- kfold(lup.longlat, k = 5)
+  lup.test <- lup.longlat[lup.fold == 1,]
+  lup.train <- lup.longlat[lup.fold != 1,]
+  
+  biflup.longlat <- biflup %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  biflup.fold <- kfold(biflup.longlat, k = 5)
+  biflup.test <- biflup.longlat[biflup.fold == 1,]
+  biflup.train <- biflup.longlat[biflup.fold != 1,]
+  
+  lup.maxent <- maxent(x = stack(bioclim), 
+                       p = lup.train, 
+                       a = bg.train)
+  lup.predict <- dismo::predict(lup.maxent,
+                                stack(bioclim))
+  
+  bif.by.lup <- maxent(x = stack(stack(bioclim), lup.predict),
+                       p = bif.train,
+                       a = bg.train)
+  
+  biflup.maxent <- maxent(x = stack(bioclim), 
+                          p = biflup.train, 
+                          a = bg.train)
+```
+
+### Penstemon
+```{r bifpen models}
+gbif.pen <- gbif %>%
+  filter(genus == "Penstemon")
+
+bifpen <- bbna %>%
+  filter(species == "bifarius",
+         plant.host.genus == "Penstemon") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  bif.longlat <- bbna %>%
+    filter(species == "bifarius",
+           plant.host.genus != "Penstemon") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bif.fold <- kfold(bif.longlat, k = 5)
+  bif.test <- bif.longlat[bif.fold == 1,]
+  bif.train <- bif.longlat[bif.fold != 1,]
+  
+  pen.longlat <- gbif.pen %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  pen.fold <- kfold(pen.longlat, k = 5)
+  pen.test <- pen.longlat[pen.fold == 1,]
+  pen.train <- pen.longlat[pen.fold != 1,]
+  
+  bifpen.longlat <- bifpen %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bifpen.fold <- kfold(bifpen.longlat, k = 5)
+  bifpen.test <- bifpen.longlat[bifpen.fold == 1,]
+  bifpen.train <- bifpen.longlat[bifpen.fold != 1,]
+  
+  pen.maxent <- maxent(x = stack(bioclim), 
+                       p = pen.train, 
+                       a = bg.train)
+  pen.predict <- dismo::predict(pen.maxent,
+                                stack(bioclim))
+  
+  bif.by.pen <- maxent(x = stack(stack(bioclim), pen.predict),
+                       p = bif.train,
+                       a = bg.train)
+  
+  bifpen.maxent <- maxent(x = stack(bioclim), 
+                          p = bifpen.train, 
+                          a = bg.train)
+```
+
+## B. flavifrons
+### Chamaenerion
+```{r flavcham models}
+gbif.cham <- gbif %>%
+  filter(genus == "Chamaenerion")
+
+flavcham <- bbna %>%
+  filter(species == "flavifrons",
+         plant.host.genus == "Chamaenerion") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  flav.longlat <- bbna %>%
+    filter(species == "flavifrons",
+           plant.host.genus != "Chamaenerion") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flav.fold <- kfold(flav.longlat, k = 5)
+  flav.test <- flav.longlat[flav.fold == 1,]
+  flav.train <- flav.longlat[flav.fold != 1,]
+  
+  cham.longlat <- gbif.cham %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cham.fold <- kfold(cham.longlat, k = 5)
+  cham.test <- cham.longlat[cham.fold == 1,]
+  cham.train <- cham.longlat[cham.fold != 1,]
+  
+  flavcham.longlat <- flavcham %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flavcham.fold <- kfold(flavcham.longlat, k = 5)
+  flavcham.test <- flavcham.longlat[flavcham.fold == 1,]
+  flavcham.train <- flavcham.longlat[flavcham.fold != 1,]
+  
+  cham.maxent <- maxent(x = stack(bioclim), 
+                       p = cham.train, 
+                       a = bg.train)
+  cham.predict <- dismo::predict(cham.maxent,
+                                stack(bioclim))
+  
+  flav.by.cham <- maxent(x = stack(stack(bioclim), cham.predict),
+                       p = flav.train,
+                       a = bg.train)
+  
+  flavcham.maxent <- maxent(x = stack(bioclim), 
+                          p = flavcham.train, 
+                          a = bg.train)
+```
+
+
+### Cirsium
+```{r flavcir models}
+gbif.cir <- gbif %>%
+  filter(genus == "Cirsium")
+
+flavcir <- bbna %>%
+  filter(species == "flavifrons",
+         plant.host.genus == "Cirsium") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  flav.longlat <- bbna %>%
+    filter(species == "flavifrons",
+           plant.host.genus != "Cirsium") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flav.fold <- kfold(flav.longlat, k = 5)
+  flav.test <- flav.longlat[flav.fold == 1,]
+  flav.train <- flav.longlat[flav.fold != 1,]
+  
+  cir.longlat <- gbif.cir %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cir.fold <- kfold(cir.longlat, k = 5)
+  cir.test <- cir.longlat[cir.fold == 1,]
+  cir.train <- cir.longlat[cir.fold != 1,]
+  
+  flavcir.longlat <- flavcir %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flavcir.fold <- kfold(flavcir.longlat, k = 5)
+  flavcir.test <- flavcir.longlat[flavcir.fold == 1,]
+  flavcir.train <- flavcir.longlat[flavcir.fold != 1,]
+  
+  cir.maxent <- maxent(x = stack(bioclim), 
+                       p = cir.train, 
+                       a = bg.train)
+  cir.predict <- dismo::predict(cir.maxent,
+                                stack(bioclim))
+  
+  flav.by.cir <- maxent(x = stack(stack(bioclim), cir.predict),
+                       p = flav.train,
+                       a = bg.train)
+  
+  flavcir.maxent <- maxent(x = stack(bioclim), 
+                          p = flavcir.train, 
+                          a = bg.train)
+```
+
+### Lupinus
+```{r flavlup models}
+gbif.lup <- gbif %>%
+  filter(genus == "Lupinus")
+
+flavlup <- bbna %>%
+  filter(species == "flavifrons",
+         plant.host.genus == "Lupinus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  flav.longlat <- bbna %>%
+    filter(species == "flavifrons",
+           plant.host.genus != "Lupinus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flav.fold <- kfold(flav.longlat, k = 5)
+  flav.test <- flav.longlat[flav.fold == 1,]
+  flav.train <- flav.longlat[flav.fold != 1,]
+  
+  lup.longlat <- gbif.lup %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  lup.fold <- kfold(lup.longlat, k = 5)
+  lup.test <- lup.longlat[lup.fold == 1,]
+  lup.train <- lup.longlat[lup.fold != 1,]
+  
+  flavlup.longlat <- flavlup %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flavlup.fold <- kfold(flavlup.longlat, k = 5)
+  flavlup.test <- flavlup.longlat[flavlup.fold == 1,]
+  flavlup.train <- flavlup.longlat[flavlup.fold != 1,]
+  
+  lup.maxent <- maxent(x = stack(bioclim), 
+                       p = lup.train, 
+                       a = bg.train)
+  lup.predict <- dismo::predict(lup.maxent,
+                                stack(bioclim))
+  
+  flav.by.lup <- maxent(x = stack(stack(bioclim), lup.predict),
+                       p = flav.train,
+                       a = bg.train)
+  
+  flavlup.maxent <- maxent(x = stack(bioclim), 
+                          p = flavlup.train, 
+                          a = bg.train)
+```
+
+### Penstemon
+```{r flavpen models}
+gbif.pen <- gbif %>%
+  filter(genus == "Penstemon")
+
+flavpen <- bbna %>%
+  filter(species == "flavifrons",
+         plant.host.genus == "Penstemon") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  flav.longlat <- bbna %>%
+    filter(species == "flavifrons",
+           plant.host.genus != "Penstemon") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flav.fold <- kfold(flav.longlat, k = 5)
+  flav.test <- flav.longlat[flav.fold == 1,]
+  flav.train <- flav.longlat[flav.fold != 1,]
+  
+  pen.longlat <- gbif.pen %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  pen.fold <- kfold(pen.longlat, k = 5)
+  pen.test <- pen.longlat[pen.fold == 1,]
+  pen.train <- pen.longlat[pen.fold != 1,]
+  
+  flavpen.longlat <- flavpen %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flavpen.fold <- kfold(flavpen.longlat, k = 5)
+  flavpen.test <- flavpen.longlat[flavpen.fold == 1,]
+  flavpen.train <- flavpen.longlat[flavpen.fold != 1,]
+  
+  pen.maxent <- maxent(x = stack(bioclim), 
+                       p = pen.train, 
+                       a = bg.train)
+  pen.predict <- dismo::predict(pen.maxent,
+                                stack(bioclim))
+  
+  flav.by.pen <- maxent(x = stack(stack(bioclim), pen.predict),
+                       p = flav.train,
+                       a = bg.train)
+  
+  flavpen.maxent <- maxent(x = stack(bioclim), 
+                          p = flavpen.train, 
+                          a = bg.train)
+```
+
+### Rubus
+```{r flavrub models}
+gbif.rub <- gbif %>%
+  filter(genus == "Rubus")
+
+flavrub <- bbna %>%
+  filter(species == "flavifrons",
+         plant.host.genus == "Rubus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  flav.longlat <- bbna %>%
+    filter(species == "flavifrons",
+           plant.host.genus != "Rubus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flav.fold <- kfold(flav.longlat, k = 5)
+  flav.test <- flav.longlat[flav.fold == 1,]
+  flav.train <- flav.longlat[flav.fold != 1,]
+  
+  rub.longlat <- gbif.rub %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  rub.fold <- kfold(rub.longlat, k = 5)
+  rub.test <- rub.longlat[rub.fold == 1,]
+  rub.train <- rub.longlat[rub.fold != 1,]
+  
+  flavrub.longlat <- flavrub %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  flavrub.fold <- kfold(flavrub.longlat, k = 5)
+  flavrub.test <- flavrub.longlat[flavrub.fold == 1,]
+  flavrub.train <- flavrub.longlat[flavrub.fold != 1,]
+  
+  rub.maxent <- maxent(x = stack(bioclim), 
+                       p = rub.train, 
+                       a = bg.train)
+  rub.predict <- dismo::predict(rub.maxent,
+                                stack(bioclim))
+  
+  flav.by.rub <- maxent(x = stack(stack(bioclim), rub.predict),
+                       p = flav.train,
+                       a = bg.train)
+  
+  flavrub.maxent <- maxent(x = stack(bioclim), 
+                          p = flavrub.train, 
+                          a = bg.train)
+```
+
+## B. mixtus
+### Chamaenerion
+```{r mixcham models}
+gbif.cham <- gbif %>%
+  filter(genus == "Chamaenerion")
+
+mixcham <- bbna %>%
+  filter(species == "mixtus",
+         plant.host.genus == "Chamaenerion") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  mix.longlat <- bbna %>%
+    filter(species == "mixtus",
+           plant.host.genus != "Chamaenerion") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mix.fold <- kfold(mix.longlat, k = 5)
+  mix.test <- mix.longlat[mix.fold == 1,]
+  mix.train <- mix.longlat[mix.fold != 1,]
+  
+  cham.longlat <- gbif.cham %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cham.fold <- kfold(cham.longlat, k = 5)
+  cham.test <- cham.longlat[cham.fold == 1,]
+  cham.train <- cham.longlat[cham.fold != 1,]
+  
+  mixcham.longlat <- mixcham %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mixcham.fold <- kfold(mixcham.longlat, k = 5)
+  mixcham.test <- mixcham.longlat[mixcham.fold == 1,]
+  mixcham.train <- mixcham.longlat[mixcham.fold != 1,]
+  
+  cham.maxent <- maxent(x = stack(bioclim), 
+                       p = cham.train, 
+                       a = bg.train)
+  cham.predict <- dismo::predict(cham.maxent,
+                                stack(bioclim))
+  
+  mix.by.cham <- maxent(x = stack(stack(bioclim), cham.predict),
+                       p = mix.train,
+                       a = bg.train)
+  
+  mixcham.maxent <- maxent(x = stack(bioclim), 
+                          p = mixcham.train, 
+                          a = bg.train)
+```
+
+### Lupinus
+```{r mixlup models}
+gbif.lup <- gbif %>%
+  filter(genus == "Lupinus")
+
+mixlup <- bbna %>%
+  filter(species == "mixtus",
+         plant.host.genus == "Lupinus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  mix.longlat <- bbna %>%
+    filter(species == "mixtus",
+           plant.host.genus != "Lupinus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mix.fold <- kfold(mix.longlat, k = 5)
+  mix.test <- mix.longlat[mix.fold == 1,]
+  mix.train <- mix.longlat[mix.fold != 1,]
+  
+  lup.longlat <- gbif.lup %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  lup.fold <- kfold(lup.longlat, k = 5)
+  lup.test <- lup.longlat[lup.fold == 1,]
+  lup.train <- lup.longlat[lup.fold != 1,]
+  
+  mixlup.longlat <- mixlup %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mixlup.fold <- kfold(mixlup.longlat, k = 5)
+  mixlup.test <- mixlup.longlat[mixlup.fold == 1,]
+  mixlup.train <- mixlup.longlat[mixlup.fold != 1,]
+  
+  lup.maxent <- maxent(x = stack(bioclim), 
+                       p = lup.train, 
+                       a = bg.train)
+  lup.predict <- dismo::predict(lup.maxent,
+                                stack(bioclim))
+  
+  mix.by.lup <- maxent(x = stack(stack(bioclim), lup.predict),
+                       p = mix.train,
+                       a = bg.train)
+  
+  mixlup.maxent <- maxent(x = stack(bioclim), 
+                          p = mixlup.train, 
+                          a = bg.train)
+```
+
+### Rubus
+```{r mixrub models}
+gbif.rub <- gbif %>%
+  filter(genus == "Rubus")
+
+mixrub <- bbna %>%
+  filter(species == "mixtus",
+         plant.host.genus == "Rubus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  mix.longlat <- bbna %>%
+    filter(species == "mixtus",
+           plant.host.genus != "Rubus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mix.fold <- kfold(mix.longlat, k = 5)
+  mix.test <- mix.longlat[mix.fold == 1,]
+  mix.train <- mix.longlat[mix.fold != 1,]
+  
+  rub.longlat <- gbif.rub %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  rub.fold <- kfold(rub.longlat, k = 5)
+  rub.test <- pen.longlat[rub.fold == 1,]
+  rub.train <- pen.longlat[rub.fold != 1,]
+  
+  mixrub.longlat <- mixrub %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mixrub.fold <- kfold(mixrub.longlat, k = 5)
+  mixrub.test <- mixrub.longlat[mixrub.fold == 1,]
+  mixrub.train <- mixrub.longlat[mixrub.fold != 1,]
+  
+  rub.maxent <- maxent(x = stack(bioclim), 
+                       p = rub.train, 
+                       a = bg.train)
+  rub.predict <- dismo::predict(rub.maxent,
+                                stack(bioclim))
+  
+  mix.by.rub <- maxent(x = stack(stack(bioclim), rub.predict),
+                       p = mix.train,
+                       a = bg.train)
+  
+  mixrub.maxent <- maxent(x = stack(bioclim), 
+                          p = mixrub.train, 
+                          a = bg.train)
+```
+
+## B. vosnesenskii
+### Chamaenerion
+```{r voscham models}
+gbif.cham <- gbif %>%
+  filter(genus == "Chamaenerion")
+
+voscham <- bbna %>%
+  filter(species == "vosnesenskii",
+         plant.host.genus == "Chamaenerion") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  vos.longlat <- bbna %>%
+    filter(species == "vosnesenskii",
+           plant.host.genus != "Chamaenerion") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vos.fold <- kfold(vos.longlat, k = 5)
+  vos.test <- vos.longlat[vos.fold == 1,]
+  vos.train <- vos.longlat[vos.fold != 1,]
+  
+  cham.longlat <- gbif.cham %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cham.fold <- kfold(cham.longlat, k = 5)
+  cham.test <- cham.longlat[cham.fold == 1,]
+  cham.train <- cham.longlat[cham.fold != 1,]
+  
+  voscham.longlat <- voscham %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  voscham.fold <- kfold(voscham.longlat, k = 5)
+  voscham.test <- voscham.longlat[voscham.fold == 1,]
+  voscham.train <- voscham.longlat[voscham.fold != 1,]
+  
+  cham.maxent <- maxent(x = stack(bioclim), 
+                       p = cham.train, 
+                       a = bg.train)
+  cham.predict <- dismo::predict(cham.maxent,
+                                stack(bioclim))
+  
+  vos.by.cham <- maxent(x = stack(stack(bioclim), cham.predict),
+                       p = vos.train,
+                       a = bg.train)
+  
+  voscham.maxent <- maxent(x = stack(bioclim), 
+                          p = voscham.train, 
+                          a = bg.train)
+```
+
+
+### Cirsium
+```{r voscir models}
+gbif.cir <- gbif %>%
+  filter(genus == "Cirsium")
+
+voscir <- bbna %>%
+  filter(species == "vosnesenskii",
+         plant.host.genus == "Cirsium") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  vos.longlat <- bbna %>%
+    filter(species == "vosnesenskii",
+           plant.host.genus != "Cirsium") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vos.fold <- kfold(vos.longlat, k = 5)
+  vos.test <- vos.longlat[vos.fold == 1,]
+  vos.train <- vos.longlat[vos.fold != 1,]
+  
+  cir.longlat <- gbif.cir %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  cir.fold <- kfold(cir.longlat, k = 5)
+  cir.test <- cir.longlat[cir.fold == 1,]
+  cir.train <- cir.longlat[cir.fold != 1,]
+  
+  voscir.longlat <- voscir %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  voscir.fold <- kfold(voscir.longlat, k = 5)
+  voscir.test <- voscir.longlat[voscir.fold == 1,]
+  voscir.train <- voscir.longlat[voscir.fold != 1,]
+  
+  cir.maxent <- maxent(x = stack(bioclim), 
+                       p = cir.train, 
+                       a = bg.train)
+  cir.predict <- dismo::predict(cir.maxent,
+                                stack(bioclim))
+  
+  vos.by.cir <- maxent(x = stack(stack(bioclim), cir.predict),
+                       p = vos.train,
+                       a = bg.train)
+  
+  voscir.maxent <- maxent(x = stack(bioclim), 
+                          p = voscir.train, 
+                          a = bg.train)
+```
+
+### Lupinus
+```{r voslup models}
+gbif.lup <- gbif %>%
+  filter(genus == "Lupinus")
+
+voslup <- bbna %>%
+  filter(species == "vosnesenskii",
+         plant.host.genus == "Lupinus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  vos.longlat <- bbna %>%
+    filter(species == "vosnesenskii",
+           plant.host.genus != "Lupinus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vos.fold <- kfold(vos.longlat, k = 5)
+  vos.test <- vos.longlat[vos.fold == 1,]
+  vos.train <- vos.longlat[vos.fold != 1,]
+  
+  lup.longlat <- gbif.lup %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  lup.fold <- kfold(lup.longlat, k = 5)
+  lup.test <- lup.longlat[lup.fold == 1,]
+  lup.train <- lup.longlat[lup.fold != 1,]
+  
+  voslup.longlat <- voslup %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  voslup.fold <- kfold(voslup.longlat, k = 5)
+  voslup.test <- voslup.longlat[voslup.fold == 1,]
+  voslup.train <- voslup.longlat[voslup.fold != 1,]
+  
+  lup.maxent <- maxent(x = stack(bioclim), 
+                       p = lup.train, 
+                       a = bg.train)
+  lup.predict <- dismo::predict(lup.maxent,
+                                stack(bioclim))
+  
+  vos.by.lup <- maxent(x = stack(stack(bioclim), lup.predict),
+                       p = vos.train,
+                       a = bg.train)
+  
+  voslup.maxent <- maxent(x = stack(bioclim), 
+                          p = voslup.train, 
+                          a = bg.train)
+```
+
+### Penstemon
+```{r vospen models}
+gbif.pen <- gbif %>%
+  filter(genus == "Penstemon")
+
+vospen <- bbna %>%
+  filter(species == "vosnesenskii",
+         plant.host.genus == "Penstemon") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  vos.longlat <- bbna %>%
+    filter(species == "vosnesenskii",
+           plant.host.genus != "Penstemon") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vos.fold <- kfold(vos.longlat, k = 5)
+  vos.test <- vos.longlat[vos.fold == 1,]
+  vos.train <- vos.longlat[vos.fold != 1,]
+  
+  pen.longlat <- gbif.pen %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  pen.fold <- kfold(pen.longlat, k = 5)
+  pen.test <- pen.longlat[pen.fold == 1,]
+  pen.train <- pen.longlat[pen.fold != 1,]
+  
+  vospen.longlat <- vospen %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vospen.fold <- kfold(vospen.longlat, k = 5)
+  vospen.test <- vospen.longlat[vospen.fold == 1,]
+  vospen.train <- vospen.longlat[vospen.fold != 1,]
+  
+  pen.maxent <- maxent(x = stack(bioclim), 
+                       p = pen.train, 
+                       a = bg.train)
+  pen.predict <- dismo::predict(pen.maxent,
+                                stack(bioclim))
+  
+  vos.by.pen <- maxent(x = stack(stack(bioclim), pen.predict),
+                       p = vos.train,
+                       a = bg.train)
+  
+  vospen.maxent <- maxent(x = stack(bioclim), 
+                          p = vospen.train, 
+                          a = bg.train)
+```
+
+### Rubus
+```{r vosrub models}
+gbif.rub <- gbif %>%
+  filter(genus == "Rubus")
+
+vosrub <- bbna %>%
+  filter(species == "vosnesenskii",
+         plant.host.genus == "Rubus") %>%
+  dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
+
+bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  vos.longlat <- bbna %>%
+    filter(species == "vosnesenskii",
+           plant.host.genus != "Rubus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vos.fold <- kfold(vos.longlat, k = 5)
+  vos.test <- vos.longlat[vos.fold == 1,]
+  vos.train <- vos.longlat[vos.fold != 1,]
+  
+  rub.longlat <- gbif.rub %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  rub.fold <- kfold(rub.longlat, k = 5)
+  rub.test <- rub.longlat[rub.fold == 1,]
+  rub.train <- rub.longlat[rub.fold != 1,]
+  
+  vosrub.longlat <- vosrub %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  vosrub.fold <- kfold(vosrub.longlat, k = 5)
+  vosrub.test <- vosrub.longlat[vosrub.fold == 1,]
+  vosrub.train <- vosrub.longlat[vosrub.fold != 1,]
+  
+  rub.maxent <- maxent(x = stack(bioclim), 
+                       p = rub.train, 
+                       a = bg.train)
+  rub.predict <- dismo::predict(rub.maxent,
+                                stack(bioclim))
+  
+  vos.by.rub <- maxent(x = stack(stack(bioclim), rub.predict),
+                       p = vos.train,
+                       a = bg.train)
+  
+  vosrub.maxent <- maxent(x = stack(bioclim), 
+                          p = vosrub.train, 
+                          a = bg.train)
+```
+
+# Projections
+This is a for-loop that projects everything. It is not finished yet.
+```{r predict}
+bifcham.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+bifcham.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+bifcir.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+bifcir.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+biflup.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+biflup.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+bifpen.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+bifpen.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+
+flavcham.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavcham.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavcir.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavcir.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavlup.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavlup.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavpen.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavpen.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavrub.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+flavrub.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+
+mixcham.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+mixcham.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+mixlup.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+mixlup.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+mixrub.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+mixrub.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+
+voscham.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+voscham.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+voscir.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+voscir.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+voslup.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+voslup.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+vospen.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+vospen.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+vosrub.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
+vosrub.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
+
+for(i in 1:nrow(cmip.df)){
+  cmip = crop(cmip6_world(model = cmip.df[i, 3],
+                          ssp = cmip.df[i, 2],
+                          time = cmip.df[i, 1],
+                          var = "bioc",
+                          res = "2.5",
+                          path = getwd()),
+              ext(-130, -110, 40, 50))
+  
+  names(cmip) = names(bioclim)
+  
+  # B. bifarius X Chamaenerion
+  bifcham.overlap.predict[[i]] = dismo::predict(bif.by.cham,
+          stack(stack(cmip), cham.predict))
+  bifcham.idm.predict[[i]] = dismo::predict(bifcham.maxent,
+                               stack(cmip))
+  
+  # B. bifarius X Cirsium
+  bifcir.overlap.predict[[i]] = dismo::predict(bif.by.cir,
+                                   stack(stack(cmip), cir.predict))
+  bifcir.idm.predict[[i]] = dismo::predict(bifcir.maxent,
+                               stack(cmip))
+  
+  # B. bifarius X Lupinus
+  biflup.overlap.predict[[i]] = dismo::predict(bif.by.lup,
+                                   stack(stack(cmip), lup.predict))
+  biflup.idm.predict[[i]] = dismo::predict(biflup.maxent,
+                               stack(cmip))
+  
+  # B. bifarius X Penstemon
+  bifpen.overlap.predict[[i]] = dismo::predict(bif.by.pen,
+                                   stack(stack(cmip), pen.predict))
+  bifpen.idm.predict[[i]] = dismo::predict(bifpen.maxent,
+                               stack(cmip))
+  
+    # B. flavifrons X Chamaenerion
+  flavcham.overlap.predict[[i]] = dismo::predict(flav.by.cham,
+          stack(stack(cmip), cham.predict))
+  flavcham.idm.predict[[i]] = dismo::predict(flavcham.maxent,
+                               stack(cmip))
+  
+  # B. flavifrons X Cirsium
+  flavcir.overlap.predict[[i]] = dismo::predict(flav.by.cir,
+                                   stack(stack(cmip), cir.predict))
+  flavcir.idm.predict[[i]] = dismo::predict(flavcir.maxent,
+                               stack(cmip))
+  
+  # B. flavifrons X Lupinus
+  flavlup.overlap.predict[[i]] = dismo::predict(flav.by.lup,
+                                   stack(stack(cmip), lup.predict))
+  flavlup.idm.predict[[i]] = dismo::predict(flavlup.maxent,
+                               stack(cmip))
+  
+  # B. flavifrons X Penstemon
+  flavpen.overlap.predict[[i]] = dismo::predict(flav.by.pen,
+                                   stack(stack(cmip), pen.predict))
+  flavpen.idm.predict[[i]] = dismo::predict(flavpen.maxent,
+                               stack(cmip))
+  
+    # B. flavifrons X Rubus
+  flavrub.overlap.predict[[i]] = dismo::predict(flav.by.rub,
+                                   stack(stack(cmip), pen.predict))
+  flavrub.idm.predict[[i]] = dismo::predict(flavrub.maxent,
+                               stack(cmip))
+  
+      # B. mixtus X Chamaenerion
+  mixcham.overlap.predict[[i]] = dismo::predict(mix.by.cham,
+          stack(stack(cmip), cham.predict))
+  mixcham.idm.predict[[i]] = dismo::predict(mixcham.maxent,
+                               stack(cmip))
+  
+  # B. mixtus X Lupinus
+  mixlup.overlap.predict[[i]] = dismo::predict(mix.by.lup,
+                                   stack(stack(cmip), lup.predict))
+  mixlup.idm.predict[[i]] = dismo::predict(mixlup.maxent,
+                               stack(cmip))
+  
+    # B. mixtus X Rubus
+  mixrub.overlap.predict[[i]] = dismo::predict(mix.by.rub,
+                                   stack(stack(cmip), pen.predict))
+  mixrub.idm.predict[[i]] = dismo::predict(mixrub.maxent,
+                               stack(cmip))
+  
+      # B. vosnesenskii X Chamaenerion
+  voscham.overlap.predict[[i]] = dismo::predict(vos.by.cham,
+          stack(stack(cmip), cham.predict))
+  voscham.idm.predict[[i]] = dismo::predict(voscham.maxent,
+                               stack(cmip))
+  
+  # B. vosnesenskii X Cirsium
+  voscir.overlap.predict[[i]] = dismo::predict(vos.by.cir,
+                                   stack(stack(cmip), cir.predict))
+  voscir.idm.predict[[i]] = dismo::predict(voscir.maxent,
+                               stack(cmip))
+  
+  # B. vosnesenskii X Lupinus
+  voslup.overlap.predict[[i]] = dismo::predict(vos.by.lup,
+                                   stack(stack(cmip), lup.predict))
+  voslup.idm.predict[[i]] = dismo::predict(voslup.maxent,
+                               stack(cmip))
+  
+  # B. vosnesenskii X Penstemon
+  vospen.overlap.predict[[i]] = dismo::predict(vos.by.pen,
+                                   stack(stack(cmip), pen.predict))
+  vospen.idm.predict[[i]] = dismo::predict(vospen.maxent,
+                               stack(cmip))
+  
+    # B. vosnesenskii X Rubus
+  vosrub.overlap.predict[[i]] = dismo::predict(vos.by.rub,
+                                   stack(stack(cmip), pen.predict))
+  vosrub.idm.predict[[i]] = dismo::predict(vosrub.maxent,
+                               stack(cmip))
+}
+```
+This currently runs for one, so I need to get it to save somewhere useful so that I can run it for everything. And also figure out how I want to compare the overlaps. Simple subtraction?
+
+```{r overlap - IDM}
+overlap.overestimate = overlap.predict - idm.predict
+```
+Well this works. Does it tell me anything? Can I get like a single number for how badly the overlap overestimates things?
