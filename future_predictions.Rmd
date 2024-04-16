@@ -1287,9 +1287,19 @@ for(i in 1:nrow(intpair.df)){
 ```
 
 
-I need to figure out how I want to compare the overlaps. Simple subtraction?
+I need to figure out how I want to compare the overlaps. Right now I'm using root mean square error (RMSE) but there are some other options. [This article](https://www.mdpi.com/2072-4292/14/21/5446) seems to have some good info on different options, though it's geared for ArcGIS, not R.
 
-```{r overlap - IDM}
-overlap.overestimate = overlap.predict - idm.predict
+```{r RMSE}
+RMSE.2040ssp245 <- vector(mode = "list", length = nrow(intpair.df)/2)
+RMSE.2080ssp245 <- vector(mode = "list", length = nrow(intpair.df)/2)
+RMSE.2040ssp585 <- vector(mode = "list", length = nrow(intpair.df)/2)
+RMSE.2080ssp585 <- vector(mode = "list", length = nrow(intpair.df)/2)
+
+for(i in 1:(nrow(intpair.df)/2)){
+  RMSE.2040ssp245[[i]] = RMSE(ensemble.2040ssp245[[(2*i)-1]], ensemble.2040ssp245[[2*i]])
+  RMSE.2080ssp245[[i]] = RMSE(ensemble.2080ssp245[[(2*i)-1]], ensemble.2080ssp245[[2*i]])
+  RMSE.2040ssp585[[i]] = RMSE(ensemble.2040ssp585[[(2*i)-1]], ensemble.2040ssp585[[2*i]])
+  RMSE.2080ssp585[[i]] = RMSE(ensemble.2080ssp585[[(2*i)-1]], ensemble.2080ssp585[[2*i]])
+}
 ```
 Well this works. Does it tell me anything? Can I get like a single number for how badly the overlap overestimates things?
