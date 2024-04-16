@@ -71,6 +71,20 @@ cmip.df <- data.frame(time = c(rep("2021-2040", 50),
                                     "MPI-ESM1-2-LR", 
                                     "MRI-ESM2-0", 
                                     "UKESM1-0-LL"), 4))
+
+intpair.df <- data.frame(pair = c(rep("bifcham", 2), rep("bifcir", 2), rep("biflup", 2), rep("bifpen", 2),
+                                  rep("flavcham", 2), rep("flavcir", 2), rep("flavlup", 2), rep("flavpen", 2), rep("flavrub", 2),
+                                  rep("mixcham", 2), rep("mixlup", 2), rep("mixrub", 2),
+                                  rep("voscham", 2), rep("voscir", 2), rep("voslup", 2), rep("vospen", 2), rep("vosrub", 2)),
+                         plant = c(rep("Chamaenerion", 2), rep("Cirsium", 2), rep("Lupinus", 2), rep("Penstemon", 2),
+                                   rep("Chamaenerion", 2), rep("Cirsium", 2), rep("Lupinus", 2), rep("Penstemon", 2), rep("Rubus", 2),
+                                   rep("Chamaenerion", 2), rep("Lupinius", 2), rep("Rubus", 2),
+                                   rep("Chamaenerion", 2), rep("Cirsium", 2), rep("Lupinus", 2), rep("Penstemon", 2), rep("Rubus", 2)),
+                         bombus = c(rep("bifarius", 8),
+                                    rep("flavifrons", 10),
+                                    rep("mixtus", 6),
+                                    rep("vosnesenskii", 10)),
+                         model = rep(c("overlap", "idm"), 17))
 ```
 
 
@@ -1091,7 +1105,7 @@ bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.
 ```
 
 # Projections
-This is a for-loop that projects everything. It is not finished yet.
+This is a for-loop that projects everything.
 ```{r predict}
 bifcham.idm.predict <- vector(mode = "list", length = nrow(cmip.df))
 bifcham.overlap.predict <- vector(mode = "list", length = nrow(cmip.df))
@@ -1245,7 +1259,35 @@ for(i in 1:nrow(cmip.df)){
                                stack(cmip))
 }
 ```
-This currently runs for one, so I need to get it to save somewhere useful so that I can run it for everything. And also figure out how I want to compare the overlaps. Simple subtraction?
+
+## Ensemble
+
+Now to combine all of the models into a single ensemble for each timeframe/ssp combination. Each plant-pollinator pair has two lists, one for the overlap and one for the IDM. Each of those lists is 100 spaces long and are organized as follows:
+
+* 1--25: 2021--2040, ssp 245
+
+* 26--50: 2021--2040, ssp 585
+
+* 51--75: 2061--2080, ssp 245
+
+* 76--100: 2061--2080, ssp 585
+
+```{r ensemble}
+ensemble.2040ssp245 <- vector(mode = "list", length = nrow(intpair.df))
+ensemble.2080ssp245 <- vector(mode = "list", length = nrow(intpair.df))
+ensemble.2040ssp585 <- vector(mode = "list", length = nrow(intpair.df))
+ensemble.2080ssp585 <- vector(mode = "list", length = nrow(intpair.df))
+
+for(i in 1:nrow(intpair.df)){
+  ensemble.2040ssp245[[i]] = mean(stack(get(paste(intpair.df[i, 1], intpair.df[i, 4], "predict", sep = "."))[1:25]))
+  ensemble.2040ssp585[[i]] = mean(stack(get(paste(intpair.df[i, 1], intpair.df[i, 4], "predict", sep = "."))[26:50]))
+  ensemble.2080ssp245[[i]] = mean(stack(get(paste(intpair.df[i, 1], intpair.df[i, 4], "predict", sep = "."))[51:75]))
+  ensemble.2080ssp585[[i]] = mean(stack(get(paste(intpair.df[i, 1], intpair.df[i, 4], "predict", sep = "."))[76:100]))
+}
+```
+
+
+I need to figure out how I want to compare the overlaps. Simple subtraction?
 
 ```{r overlap - IDM}
 overlap.overestimate = overlap.predict - idm.predict
