@@ -133,15 +133,13 @@ for(i in 1:length(ints)){
              run == j)
     delta_AUC = (df %>% filter(model_type == "IDM"))$AUC - (df %>% filter(model_type == "floral_predictor"))$AUC
     delta_TSS = (df %>% filter(model_type == "IDM"))$TSS - (df %>% filter(model_type == "floral_predictor"))$TSS
-    delta_Boyce = (df %>% filter(model_type == "IDM"))$boyce - (df %>% filter(model_type == "floral_predictor"))$boyce
     
     temp.df = data.frame(int = int,
                          bee_species = NA,
                          plant_genus = NA,
                          model_run = j,
                          delta_AUC = delta_AUC,
-                         delta_TSS = delta_TSS,
-                         delta_Boyce = delta_Boyce)
+                         delta_TSS = delta_TSS)
     int.df = bind_rows(int.df, temp.df)
   }
 }
@@ -216,21 +214,6 @@ bifcham.tssplot <- ggplot(bifcham.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 bifcham.tssplot
 ggsave("figures/bifcham-tss.png", bifcham.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-bifcham.boycetest <- aov(boyce ~ model, data = bifcham.evaldf)
-summary(bifcham.boycetest)
-TukeyHSD(bifcham.boycetest)
-
-bifcham.boyceplot <- ggplot(bifcham.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("bbcham", "chambb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-bifcham.boyceplot
-ggsave("figures/bifcham-boyce.png", bifcham.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Cirsium
@@ -264,21 +247,6 @@ bifcir.tssplot <- ggplot(bifcir.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 bifcir.tssplot
 ggsave("figures/bifcir-tss.png", bifcir.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-bifcir.boycetest <- aov(boyce ~ model, data = bifcir.evaldf)
-summary(bifcir.boycetest)
-TukeyHSD(bifcir.boycetest)
-
-bifcir.boyceplot <- ggplot(bifcir.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("bbcir", "cirbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-bifcir.boyceplot
-ggsave("figures/bifcir-boyce.png", bifcir.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 #### Lupinus
 
@@ -312,21 +280,6 @@ biflup.tssplot <- ggplot(biflup.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 biflup.tssplot
 ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-biflup.boycetest <- aov(boyce ~ model, data = biflup.evaldf)
-summary(biflup.boycetest)
-TukeyHSD(biflup.boycetest)
-
-biflup.boyceplot <- ggplot(biflup.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("bbl", "lbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-biflup.boyceplot
-ggsave("figures/biflup-boyce.png", biflup.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Penstemon
@@ -361,21 +314,6 @@ bifpen.tssplot <- ggplot(bifpen.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 bifpen.tssplot
 ggsave("figures/bifpen-tss.png", bifpen.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-bifpen.boycetest <- aov(boyce ~ model, data = bifpen.evaldf)
-summary(bifpen.boycetest)
-TukeyHSD(bifpen.boycetest)
-
-bifpen.boyceplot <- ggplot(bifpen.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("bbp", "pbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-bifpen.boyceplot
-ggsave("figures/bifpen-boyce.png", bifpen.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 ### Flavifrons
@@ -410,22 +348,6 @@ flavcham.tssplot <- ggplot(flavcham.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 flavcham.tssplot
 ggsave("figures/flavcham-tss.png", flavcham.tssplot, width = 2.5, height = 4, units = "in")
-
-
-# Boyce
-flavcham.boycetest <- aov(boyce ~ model, data = flavcham.evaldf)
-summary(flavcham.boycetest)
-TukeyHSD(flavcham.boycetest)
-
-flavcham.boyceplot <- ggplot(flavcham.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbcham", "chambf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-flavcham.boyceplot
-ggsave("figures/flavcham-boyce.png", flavcham.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Cirsium
@@ -459,21 +381,6 @@ flavcir.tssplot <- ggplot(flavcir.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 flavcir.tssplot
 ggsave("figures/flavcir-tss.png", flavcir.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-flavcir.boycetest <- aov(boyce ~ model, data = flavcir.evaldf)
-summary(flavcir.boycetest)
-TukeyHSD(flavcir.boycetest)
-
-flavcir.boyceplot <- ggplot(flavcir.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbcir", "cirbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-flavcir.boyceplot
-ggsave("figures/flavcir-boyce.png", flavcir.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Lupinus
@@ -507,21 +414,6 @@ flavlup.tssplot <- ggplot(flavlup.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 flavlup.tssplot
 ggsave("figures/flavlup-tss.png", flavlup.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-flavlup.boycetest <- aov(boyce ~ model, data = flavlup.evaldf)
-summary(flavlup.boycetest)
-TukeyHSD(flavlup.boycetest)
-
-flavlup.boyceplot <- ggplot(flavlup.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbl", "lbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-flavlup.boyceplot
-ggsave("figures/flavlup-boyce.png", flavlup.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 #### Penstemon
 ```{r flavpen eval plots}
@@ -554,21 +446,6 @@ flavpen.tssplot <- ggplot(flavpen.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 flavpen.tssplot
 ggsave("figures/flavpen-tss.png", flavpen.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-flavpen.boycetest <- aov(boyce ~ model, data = flavpen.evaldf)
-summary(flavpen.boycetest)
-TukeyHSD(flavpen.boycetest)
-
-flavpen.boyceplot <- ggplot(flavpen.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbp", "pbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-flavpen.boyceplot
-ggsave("figures/flavpen-boyce.png", flavpen.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Rubus
@@ -602,21 +479,6 @@ flavrub.tssplot <- ggplot(flavrub.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 flavrub.tssplot
 ggsave("figures/flavrub-tss.png", flavrub.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-flavrub.boycetest <- aov(boyce ~ model, data = flavrub.evaldf)
-summary(flavrub.boycetest)
-TukeyHSD(flavrub.boycetest)
-
-flavrub.boyceplot <- ggplot(flavrub.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbrub", "rubbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-flavrub.boyceplot
-ggsave("figures/flavrub-boyce.png", flavrub.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 ### Mixtus
@@ -651,21 +513,6 @@ mixcham.tssplot <- ggplot(mixcham.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 mixcham.tssplot
 ggsave("figures/mixcham-tss.png", mixcham.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-mixcham.boycetest <- aov(boyce ~ model, data = mixcham.evaldf)
-summary(mixcham.boycetest)
-TukeyHSD(mixcham.boycetest)
-
-mixcham.boyceplot <- ggplot(mixcham.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbcham", "chambm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-mixcham.boyceplot
-ggsave("figures/mixcham-boyce.png", mixcham.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Lupinus
@@ -699,21 +546,6 @@ mixlup.tssplot <- ggplot(mixlup.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 mixlup.tssplot
 ggsave("figures/mixlup-tss.png", mixlup.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-mixlup.boycetest <- aov(boyce ~ model, data = mixlup.evaldf)
-summary(mixlup.boycetest)
-TukeyHSD(mixlup.boycetest)
-
-mixlup.boyceplot <- ggplot(mixlup.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbl", "lbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-mixlup.boyceplot
-ggsave("figures/mixlup-boyce.png", mixlup.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Rubus
@@ -747,21 +579,6 @@ mixrub.tssplot <- ggplot(mixrub.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 mixrub.tssplot
 ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-mixrub.boycetest <- aov(boyce ~ model, data = mixrub.evaldf)
-summary(mixrub.boycetest)
-TukeyHSD(mixrub.boycetest)
-
-mixrub.boyceplot <- ggplot(mixrub.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbrub", "rubbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-mixrub.boyceplot
-ggsave("figures/mixrub-boyce.png", mixrub.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 ### Vosnesenskii
@@ -796,21 +613,6 @@ voscham.tssplot <- ggplot(voscham.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 voscham.tssplot
 ggsave("figures/voscham-tss.png", voscham.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-voscham.boycetest <- aov(boyce ~ model, data = voscham.evaldf)
-summary(voscham.boycetest)
-TukeyHSD(voscham.boycetest)
-
-voscham.boyceplot <- ggplot(voscham.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbcham", "chambv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-voscham.boyceplot
-ggsave("figures/voscham-boyce.png", voscham.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Cirsium
@@ -844,21 +646,6 @@ voscir.tssplot <- ggplot(voscir.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 voscir.tssplot
 ggsave("figures/voscir-tss.png", voscir.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-voscir.boycetest <- aov(boyce ~ model, data = voscir.evaldf)
-summary(voscir.boycetest)
-TukeyHSD(voscir.boycetest)
-
-voscir.boyceplot <- ggplot(voscir.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbcir", "cirbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-voscir.boyceplot
-ggsave("figures/voscir-boyce.png", voscir.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Lupinus
@@ -892,21 +679,6 @@ voslup.tssplot <- ggplot(voslup.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 voslup.tssplot
 ggsave("figures/voslup-tss.png", voslup.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-voslup.boycetest <- aov(boyce ~ model, data = voslup.evaldf)
-summary(voslup.boycetest)
-TukeyHSD(voslup.boycetest)
-
-voslup.boyceplot <- ggplot(voslup.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbl", "lbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-voslup.boyceplot
-ggsave("figures/voslup-boyce.png", voslup.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Penstemon
@@ -940,21 +712,6 @@ vospen.tssplot <- ggplot(vospen.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 vospen.tssplot
 ggsave("figures/vospen-tss.png", vospen.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-vospen.boycetest <- aov(boyce ~ model, data = vospen.evaldf)
-summary(vospen.boycetest)
-TukeyHSD(vospen.boycetest)
-
-vospen.boyceplot <- ggplot(vospen.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbp", "pbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-vospen.boyceplot
-ggsave("figures/vospen-boyce.png", vospen.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
 #### Rubus
@@ -988,57 +745,8 @@ vosrub.tssplot <- ggplot(vosrub.evaldf, aes(x = model, y = TSS)) +
   lims(y = c(0.25, 1.03))
 vosrub.tssplot
 ggsave("figures/vosrub-tss.png", vosrub.tssplot, width = 2.5, height = 4, units = "in")
-
-# Boyce
-vosrub.boycetest <- aov(boyce ~ model, data = vosrub.evaldf)
-summary(vosrub.boycetest)
-TukeyHSD(vosrub.boycetest)
-
-vosrub.boyceplot <- ggplot(vosrub.evaldf, aes(x = model, y = boyce)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbr", "rbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(-0.65, 1.1))
-vosrub.boyceplot
-ggsave("figures/vosrub-boyce.png", vosrub.boyceplot, width = 2.5, height = 4, units = "in")
 ```
 
-## Boyce Index Test
-
-I suspect that the Boyce Index is highly dependent on the size of the training dataset. Since it measures the ability to predict presence points, a larger training dataset that has more opportunities to expand the overall presence range will also expand the likelihood of Boyce finding a match.
-
-```{r boyce test}
-training.info <- int.df %>%
-  group_by(int) %>%
-  summarise(n_plant_records = unique(n_plant_records),
-            n_bee_records = unique(n_bee_records),
-            n_int = unique(n_int))
-
-boyce.df <- all.evals %>%
-  left_join(training.info, by = c("X" = "int")) %>%
-  mutate(n_train = round(ifelse(model_type == "IDM", 0.8 * n_int, ifelse(model_type == "floral_predictor", 0.8 * n_plant_records, 0.8 * n_bee_records))),
-         bee = substr(X, start = 1, stop = 3),
-         plant = substr(X, start = 4, stop = 7))
-
-boyce.test <- glmmTMB(boyce ~ n_train + (1|X), data = boyce.df, family = gaussian)
-summary(boyce.test)
-```
-
-Hm. Marginal. I wonder how AUC and TSS would score on this.
-
-```{r auc tss test}
-auc.test <- glmmTMB(AUC ~ n_train + (1|X), data = boyce.df, family = binomial)
-summary(auc.test)
-
-tss.test <- glmmTMB(TSS ~ n_train + (1|X), data = boyce.df, family = binomial)
-summary(tss.test)
-```
-
-I had some trouble getting the AUC model to converge so I simplified the RE structure for all models.
-
-It's worth noting, the DHARMa plots for all three of these tests are terrible.
 
 ## Relative Difference in Model Performance
 
@@ -1047,14 +755,13 @@ Here, we want to see how we can determine whether an IDM would be better than an
 *AUC*: 
 
 ```{r relative stats}
-auc.test <- glmmTMB(delta_AUC ~ relabund_int + n_plant_species + n_int + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+auc.test <- glmmTMB(delta_AUC ~ relabund_int + n_plant_species + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+check_collinearity(auc.test)
 summary(auc.test)
 
-tss.test <- glmmTMB(delta_TSS ~ relabund_int + n_plant_species + n_int + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+tss.test <- glmmTMB(delta_TSS ~ relabund_int + n_plant_species + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+check_collinearity(tss.test)
 summary(tss.test)
-
-boyce.test <- glmmTMB(delta_Boyce ~ relabund_int + n_plant_species + n_int + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
-summary(boyce.test)
 ```
 
 There seems to be a pretty clear story here. 
