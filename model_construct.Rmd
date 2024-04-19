@@ -593,6 +593,134 @@ for(i in 1:100){
 #write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
 ```
 
+### L. polyphyllus
+
+Here, we're looking at whether things change if we assume that all of the *Lupinus* records are one species. This allows us to use a species-specific plant distribution, but is probably not true on the interaction level.
+
+I'm not re-making the IDM because it should be the same. If we include this in the final paper, we probably should just so that the same background points get selected.
+
+```{r bifarius X lupinus polyphyllus}
+gbif.luppoly <- gbif %>%
+  filter(species == "Lupinus polyphyllus")
+
+bifluppoly.evaldf <- data.frame()
+
+bifluppoly.varimpdf <- data.frame()
+
+set.seed(41924)
+
+for(i in 1:100){
+  # Step 1: separate all data into training and testing datasets
+  bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  bif.longlat <- bbna %>%
+    filter(species == "bifarius",
+           plant.host.genus != "Lupinus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bif.fold <- kfold(bif.longlat, k = 5)
+  bif.test <- bif.longlat[bif.fold == 1,]
+  bif.train <- bif.longlat[bif.fold != 1,]
+  
+  luppoly.longlat <- gbif.luppoly %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  luppoly.fold <- kfold(luppoly.longlat, k = 5)
+  luppoly.test <- luppoly.longlat[luppoly.fold == 1,]
+  luppoly.train <- luppoly.longlat[luppoly.fold != 1,]
+  
+  bifluppoly.longlat <- biflup %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  bifluppoly.fold <- kfold(bifluppoly.longlat, k = 5)
+  bifluppoly.test <- bifluppoly.longlat[bifluppoly.fold == 1,]
+  bifluppoly.train <- bifluppoly.longlat[bifluppoly.fold != 1,]
+
+
+  
+  # Step 2: Calculate overlaps
+  ## Step 2a: Initial models based on just bioclim variables
+  bif.maxent <- maxent(x = stack(bioclim),
+                       p = bif.train, 
+                       a = bg.train)
+  bif.predict <- dismo::predict(bif.maxent,
+                                stack(bioclim))
+  
+  luppoly.maxent <- maxent(x = stack(bioclim), 
+                       p = luppoly.train, 
+                       a = bg.train)
+  luppoly.predict <- dismo::predict(luppoly.maxent,
+                                stack(bioclim))
+  
+  ## Step 2b: Updated models including partner
+  bif.by.luppoly <- maxent(x = stack(stack(bioclim), luppoly.predict),
+                       p = bif.train,
+                       a = bg.train)
+  luppoly.by.bif <- maxent(x = stack(stack(bioclim), bif.predict),
+                       p = luppoly.train,
+                       a = bg.train)
+
+  
+  
+  
+  # Step 4: Evaluate all both overlap models and IDM with the same interaction test data
+  ## Step 4a: Use dismo::evaluate to get AUC and TSS scores
+  bifbyluppoly.eval <- dismo::evaluate(p = biflup.test,
+                                   a = bg.test,
+                                   model = bif.by.luppoly,
+                                   x = stack(stack(bioclim), luppoly.predict))
+  luppolybybif.eval <- dismo::evaluate(p = biflup.test,
+                                   a = bg.test,
+                                   model = luppoly.by.bif,
+                                   x = stack(stack(bioclim), bif.predict))
+
+  
+  # Step 5: Save Evaluation Scores
+  bblpoly.eval = data.frame(run = i,
+                        model = "bblpoly",
+                        AUC = bifbyluppoly.eval@auc,
+                        cor = bifbyluppoly.eval@cor,
+                        TSS = max(bifbyluppoly.eval@TPR - bifbyluppoly.eval@FPR),
+                        tstar = which.max(bifbyluppoly.eval@TPR - bifbyluppoly.eval@FPR))
+  
+  lpolybb.eval = data.frame(run = i,
+                        model = "lpolybb",
+                        AUC = luppolybybif.eval@auc,
+                        cor = luppolybybif.eval@cor,
+                        TSS = max(luppolybybif.eval@TPR - luppolybybif.eval@FPR),
+                        tstar = which.max(luppolybybif.eval@TPR - luppolybybif.eval@FPR))
+
+
+  
+  bifluppoly.evaldf = bind_rows(bifluppoly.evaldf, bblpoly.eval, lpolybb.eval)
+  
+  # Step 6: Save Variable Importance
+  bblpoly.vars = data.frame(run = rep(i, 21),
+                        model = rep("bblpoly", 21),
+                        variable = names(bif.by.luppoly@results[7:27,]),
+                        percent = bif.by.luppoly@results[7:27],
+                        permutation = bif.by.luppoly@results[28:48])
+    
+  lpolybb.vars = data.frame(run = rep(i, 21),
+                        model = rep("lpolybb", 21),
+                        variable = names(luppoly.by.bif@results[7:27,]),
+                        percent = luppoly.by.bif@results[7:27],
+                        permutation = luppoly.by.bif@results[28:48])
+  
+  bifluppoly.varimpdf = bind_rows(bifluppoly.varimpdf, bblpoly.vars, lpolybb.vars)
+}
+```
+
+
 <!-- And let's look at some variable importance. -->
 
 <!-- ```{r biflup variable importance} -->
@@ -2157,6 +2285,272 @@ for(i in 1:100){
 #write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
 ```
 
+### Rubus spectabilis
+
+```{r mixtus rubus spectabilis}
+gbif.rubspec <- gbif %>%
+  filter(species == "Rubus spectabilis")
+
+mixrubspec.evaldf <- data.frame()
+
+mixrubspec.varimpdf <- data.frame()
+
+set.seed(240419)
+for(i in 1:100){
+  # Step 1: separate all data into training and testing datasets
+  bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  mix.longlat <- bbna %>%
+    filter(species == "mixtus",
+           plant.host.genus != "Rubus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mix.fold <- kfold(mix.longlat, k = 5)
+  mix.test <- mix.longlat[mix.fold == 1,]
+  mix.train <- mix.longlat[mix.fold != 1,]
+  
+  rubspec.longlat <- gbif.rubspec %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  rubspec.fold <- kfold(rubspec.longlat, k = 5)
+  rubspec.test <- rubspec.longlat[rubspec.fold == 1,]
+  rubspec.train <- rubspec.longlat[rubspec.fold != 1,]
+  
+  mixrubspec.longlat <- mixrub %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mixrubspec.fold <- kfold(mixrubspec.longlat, k = 5)
+  mixrubspec.test <- mixrubspec.longlat[mixrubspec.fold == 1,]
+  mixrubspec.train <- mixrubspec.longlat[mixrubspec.fold != 1,]
+  
+  
+  
+  # Step 2: Calculate overlaps
+  ## Step 2a: Initial models based on just bioclim variables
+  mix.maxent <- maxent(x = stack(bioclim),
+                       p = mix.train, 
+                       a = bg.train)
+  mix.predict <- dismo::predict(mix.maxent,
+                                stack(bioclim))
+  
+  rubspec.maxent <- maxent(x = stack(bioclim), 
+                       p = rubspec.train, 
+                       a = bg.train)
+  rubspec.predict <- dismo::predict(rubspec.maxent,
+                                stack(bioclim))
+  
+  ## Step 2b: Updated models including partner
+  mix.by.rubspec <- maxent(x = stack(stack(bioclim), rubspec.predict),
+                       p = mix.train,
+                       a = bg.train)
+  rubspec.by.mix <- maxent(x = stack(stack(bioclim), mix.predict),
+                       p = rubspec.train,
+                       a = bg.train)
+  
+  
+
+  
+  
+  # Step 4: Evaluate all both overlap models and IDM with the same interaction test data
+  ## Step 4a: Use dismo::evaluate to get AUC and TSS scores
+  mixbyrubspec.eval <- dismo::evaluate(p = mixrub.test,
+                                   a = bg.test,
+                                   model = mix.by.rubspec,
+                                   x = stack(stack(bioclim), rubspec.predict))
+  rubspecbymix.eval <- dismo::evaluate(p = mixrub.test,
+                                   a = bg.test,
+                                   model = rubspec.by.mix,
+                                   x = stack(stack(bioclim), mix.predict))
+
+  
+  
+  
+  
+  
+  # Step 5: Save Evaluation Scores
+  mbrubspec.eval = data.frame(run = i,
+                        model = "mbrubspec",
+                        AUC = mixbyrubspec.eval@auc,
+                        cor = mixbyrubspec.eval@cor,
+                        TSS = max(mixbyrubspec.eval@TPR - mixbyrubspec.eval@FPR),
+                        tstar = which.max(mixbyrubspec.eval@TPR - mixbyrubspec.eval@FPR))
+  
+  rubspecbm.eval = data.frame(run = i,
+                        model = "rubspecbm",
+                        AUC = rubspecbymix.eval@auc,
+                        cor = rubspecbymix.eval@cor,
+                        TSS = max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR),
+                        tstar = which.max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR),
+                        boyce = rubspecbm.boyce$Boyce)
+
+
+  
+  mixrubspec.evaldf = bind_rows(mixrubspec.evaldf, mbrubspec.eval, rubspecbm.eval)
+  
+  
+  
+  
+  # Step 6: Save Variable Importance
+  mbrubspec.vars = data.frame(run = rep(i, 21),
+                        model = rep("mbrubspec", 21),
+                        variable = names(mix.by.rubspec@results[7:27,]),
+                        percent = mix.by.rubspec@results[7:27],
+                        permutation = mix.by.rubspec@results[28:48])
+    
+  rubspecbm.vars = data.frame(run = rep(i, 21),
+                        model = rep("rubspecbm", 21),
+                        variable = names(rubspec.by.mix@results[7:27,]),
+                        percent = rubspec.by.mix@results[7:27],
+                        permutation = rubspec.by.mix@results[28:48])
+  
+
+  
+  mixrubspec.varimpdf = bind_rows(mixrubspec.varimpdf, mbrubspec.vars, rubspecbm.vars)
+}
+```
+
+
+### Rubus parviflorus
+
+```{r mixtus rubus parviflorus}
+gbif.rubparv <- gbif %>%
+  filter(species == "Rubus parviflorus")
+
+mixrubparv.evaldf <- data.frame()
+
+mixrubparv.varimpdf <- data.frame()
+
+set.seed(2024419)
+for(i in 1:100){
+  # Step 1: separate all data into training and testing datasets
+  bg <- as.data.frame(spatSample(x = bioclim, size = 50000, method = "random", na.rm = T, xy = T)) %>%
+    dplyr::select(x, y) %>%
+    rename(longitude = x,
+           latitude = y)
+  bgfold <- kfold(bg, k = 5)
+  bg.test <- bg[bgfold == 1,]
+  bg.train <- bg[bgfold != 1,]
+  
+  mix.longlat <- bbna %>%
+    filter(species == "mixtus",
+           plant.host.genus != "Rubus") %>%
+    slice_sample(by = BBNA.code, n = 1) %>%
+    dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mix.fold <- kfold(mix.longlat, k = 5)
+  mix.test <- mix.longlat[mix.fold == 1,]
+  mix.train <- mix.longlat[mix.fold != 1,]
+  
+  rubparv.longlat <- gbif.rubparv %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>%
+  as.data.frame(.) %>%
+  rename(longitude = decimalLongitude,
+         latitude = decimalLatitude)
+  rubparv.fold <- kfold(rubparv.longlat, k = 5)
+  rubparv.test <- rubparv.longlat[rubparv.fold == 1,]
+  rubparv.train <- rubparv.longlat[rubparv.fold != 1,]
+  
+  mixrubparv.longlat <- mixrub %>%
+  dplyr::select(longitude, latitude) %>%
+  as.data.frame(.)
+  mixrubparv.fold <- kfold(mixrubparv.longlat, k = 5)
+  mixrubparv.test <- mixrubparv.longlat[mixrubparv.fold == 1,]
+  mixrubparv.train <- mixrubparv.longlat[mixrubparv.fold != 1,]
+  
+  
+  
+  # Step 2: Calculate overlaps
+  ## Step 2a: Initial models based on just bioclim variables
+  mix.maxent <- maxent(x = stack(bioclim),
+                       p = mix.train, 
+                       a = bg.train)
+  mix.predict <- dismo::predict(mix.maxent,
+                                stack(bioclim))
+  
+  rubparv.maxent <- maxent(x = stack(bioclim), 
+                       p = rubparv.train, 
+                       a = bg.train)
+  rubparv.predict <- dismo::predict(rubparv.maxent,
+                                stack(bioclim))
+  
+  ## Step 2b: Updated models including partner
+  mix.by.rubparv <- maxent(x = stack(stack(bioclim), rubparv.predict),
+                       p = mix.train,
+                       a = bg.train)
+  rubparv.by.mix <- maxent(x = stack(stack(bioclim), mix.predict),
+                       p = rubparv.train,
+                       a = bg.train)
+  
+  
+
+  
+  
+  # Step 4: Evaluate all both overlap models and IDM with the same interaction test data
+  ## Step 4a: Use dismo::evaluate to get AUC and TSS scores
+  mixbyrubparv.eval <- dismo::evaluate(p = mixrub.test,
+                                   a = bg.test,
+                                   model = mix.by.rubparv,
+                                   x = stack(stack(bioclim), rubparv.predict))
+  rubparvbymix.eval <- dismo::evaluate(p = mixrub.test,
+                                   a = bg.test,
+                                   model = rubparv.by.mix,
+                                   x = stack(stack(bioclim), mix.predict))
+
+  
+  
+  
+  
+  
+  # Step 5: Save Evaluation Scores
+  mbrubparv.eval = data.frame(run = i,
+                        model = "mbrubparv",
+                        AUC = mixbyrubparv.eval@auc,
+                        cor = mixbyrubparv.eval@cor,
+                        TSS = max(mixbyrubparv.eval@TPR - mixbyrubparv.eval@FPR),
+                        tstar = which.max(mixbyrubparv.eval@TPR - mixbyrubparv.eval@FPR))
+  
+  rubparvbm.eval = data.frame(run = i,
+                        model = "rubparvbm",
+                        AUC = rubparvbymix.eval@auc,
+                        cor = rubparvbymix.eval@cor,
+                        TSS = max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR),
+                        tstar = which.max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR),
+                        boyce = rubparvbm.boyce$Boyce)
+
+
+  
+  mixrubparv.evaldf = bind_rows(mixrubparv.evaldf, mbrubparv.eval, rubparvbm.eval)
+  
+  
+  
+  
+  # Step 6: Save Variable Importance
+  mbrubparv.vars = data.frame(run = rep(i, 21),
+                        model = rep("mbrubparv", 21),
+                        variable = names(mix.by.rubparv@results[7:27,]),
+                        percent = mix.by.rubparv@results[7:27],
+                        permutation = mix.by.rubparv@results[28:48])
+    
+  rubparvbm.vars = data.frame(run = rep(i, 21),
+                        model = rep("rubparvbm", 21),
+                        variable = names(rubparv.by.mix@results[7:27,]),
+                        percent = rubparv.by.mix@results[7:27],
+                        permutation = rubparv.by.mix@results[28:48])
+  
+
+  
+  mixrubparv.varimpdf = bind_rows(mixrubparv.varimpdf, mbrubparv.vars, rubparvbm.vars)
+}
+```
 
 
 # Vosnesenskii
@@ -3033,7 +3427,6 @@ for(i in 1:100){
 # write.csv(vosrub.evaldf, file = "completed-evals/vosrub-eval.csv")
 # write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
 ```
-
 
 # Session Info
 ```{r sessioninfo}
