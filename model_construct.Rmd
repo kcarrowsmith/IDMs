@@ -2389,8 +2389,7 @@ for(i in 1:100){
                         AUC = rubspecbymix.eval@auc,
                         cor = rubspecbymix.eval@cor,
                         TSS = max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR),
-                        tstar = which.max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR),
-                        boyce = rubspecbm.boyce$Boyce)
+                        tstar = which.max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR))
 
 
   
@@ -2523,8 +2522,7 @@ for(i in 1:100){
                         AUC = rubparvbymix.eval@auc,
                         cor = rubparvbymix.eval@cor,
                         TSS = max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR),
-                        tstar = which.max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR),
-                        boyce = rubparvbm.boyce$Boyce)
+                        tstar = which.max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR))
 
 
   
