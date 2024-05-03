@@ -33,15 +33,21 @@ Load up completed evaluation metrics.
 # Bifarius
 bifcham.evaldf <- read.csv("completed-evals/bifcham-eval.csv", stringsAsFactors = F) %>%
   mutate(X = "bifcham")
-bifcham.varimpdf <- read.csv("completed-evals/bifcham-varimport.csv", stringsAsFactors = F)
+bifcham.diffdf <- read.csv("completed-evals/bifcham-diff.csv", stringsAsFactors = F) %>%
+  mutate(X = "bifcham")
+# bifcham.varimpdf <- read.csv("completed-evals/bifcham-varimport.csv", stringsAsFactors = F)
 
 bifcir.evaldf <- read.csv("completed-evals/bifcir-eval.csv", stringsAsFactors = F) %>%
   mutate(X = "bifcir")
-bifcir.varimpdf <- read.csv("completed-evals/bifcir-varimport.csv", stringsAsFactors = F)
+bifcir.diffdf <- read.csv("completed-evals/bifcir-diff.csv", stringsAsFactors = F) %>%
+  mutate(X = "bifcir")
+# bifcir.varimpdf <- read.csv("completed-evals/bifcir-varimport.csv", stringsAsFactors = F)
 
 biflup.evaldf <- read.csv("completed-evals/biflup-eval.csv", stringsAsFactors = F) %>%
   mutate(X = "biflup")
-biflup.varimpdf <- read.csv("completed-evals/biflup-varimport.csv", stringsAsFactors = F)
+biflup.diffdf <- read.csv("completed-evals/biflup-diff.csv", stringsAsFactors = F) %>%
+  mutate(X = "biflup")
+# biflup.varimpdf <- read.csv("completed-evals/biflup-varimport.csv", stringsAsFactors = F)
 
 bifpen.evaldf <- read.csv("completed-evals/bifpen-eval.csv", stringsAsFactors = F) %>%
   mutate(X = "bifpen")
@@ -190,136 +196,204 @@ Here, we are just looking at which model is best for each of our 17 interactions
 # AUC
 bifcham.auctest <- aov(AUC ~ model, data = bifcham.evaldf)
 summary(bifcham.auctest)
-TukeyHSD(bifcham.auctest)
 
 bifcham.aucplot <- ggplot(bifcham.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbcham", "chambb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 bifcham.aucplot
-ggsave("figures/bifcham-auc.png", bifcham.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifcham-auc.png", bifcham.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 bifcham.tsstest <- aov(TSS ~ model, data = bifcham.evaldf)
 summary(bifcham.tsstest)
-TukeyHSD(bifcham.tsstest)
 
 bifcham.tssplot <- ggplot(bifcham.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbcham", "chambb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 bifcham.tssplot
-ggsave("figures/bifcham-tss.png", bifcham.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifcham-tss.png", bifcham.tssplot, width = 2.5, height = 4, units = "in")
 ```
+
+And let's look at the distribution of raster cell differences, with positive values showing the overlap predicting higher suitability and negative values showing the IDM predicting higher suitability.
+
+```{r bifcham difference}
+bbcham.diff.t <- t.test(bifcham.diffdf$layer)
+bbcham.diff.t
+
+bifcham.diffplot <- ggplot(bifcham.diffdf %>% filter(!is.na(layer)), aes(y = layer)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank())
+bifcham.diffplot
+```
+
 
 #### Cirsium
 ```{r bifcir eval plots}
 # AUC
 bifcir.auctest <- aov(AUC ~ model, data = bifcir.evaldf)
 summary(bifcir.auctest)
-TukeyHSD(bifcir.auctest)
 
 bifcir.aucplot <- ggplot(bifcir.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbcir", "cirbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 bifcir.aucplot
-ggsave("figures/bifcir-auc.png", bifcir.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifcir-auc.png", bifcir.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 bifcir.tsstest <- aov(TSS ~ model, data = bifcir.evaldf)
 summary(bifcir.tsstest)
-TukeyHSD(bifcir.tsstest)
 
 bifcir.tssplot <- ggplot(bifcir.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbcir", "cirbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 bifcir.tssplot
-ggsave("figures/bifcir-tss.png", bifcir.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifcir-tss.png", bifcir.tssplot, width = 2.5, height = 4, units = "in")
 ```
+
+```{r bifcir difference}
+bbcir.diff.t <- t.test(bifcir.diffdf$layer)
+bbcir.diff.t
+
+bifcir.diffplot <- ggplot(bifcir.diffdf %>% filter(!is.na(layer)), aes(y = layer)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank())
+bifcir.diffplot
+```
+
 #### Lupinus
 
 ```{r biflup eval plots}
 # AUC
 biflup.auctest <- aov(AUC ~ model, data = biflup.evaldf)
 summary(biflup.auctest)
-TukeyHSD(biflup.auctest)
 
 biflup.aucplot <- ggplot(biflup.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbl", "lbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 biflup.aucplot
-ggsave("figures/biflup-auc.png", biflup.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/biflup-auc.png", biflup.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 biflup.tsstest <- aov(TSS ~ model, data = biflup.evaldf)
 summary(biflup.tsstest)
-TukeyHSD(biflup.tsstest)
 
 biflup.tssplot <- ggplot(biflup.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbl", "lbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 biflup.tssplot
-ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
-##### L. polyphyllus
-```{r bif lpoly}
-bifluppoly.evaldf <- bifluppoly.evaldf %>%
-  bind_rows(biflup.evaldf %>%
-              filter(model == "IDM"))
+```{r biflup difference}
+bblup.diff.t <- t.test(biflup.diffdf$layer)
+bblup.diff.t
 
-
-bifluppoly.auctest <- aov(AUC ~ model, data = bifluppoly.evaldf)
-summary(bifluppoly.auctest)
-TukeyHSD(bifluppoly.auctest)
-
-bifluppoly.aucplot <- ggplot(bifluppoly.evaldf, aes(x = model, y = AUC)) +
+biflup.diffplot <- ggplot(biflup.diffdf %>% filter(!is.na(layer)), aes(y = layer)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("bblpoly", "lpolybb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
   theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.59, 1.03))
-bifluppoly.aucplot
-ggsave("figures/bifluppoly-auc.png", bifluppoly.aucplot, width = 2.5, height = 4, units = "in")
-
-# TSS
-bifluppoly.tsstest <- aov(TSS ~ model, data = bifluppoly.evaldf)
-summary(bifluppoly.tsstest)
-TukeyHSD(bifluppoly.tsstest)
-
-bifluppoly.tssplot <- ggplot(bifluppoly.evaldf, aes(x = model, y = TSS)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("bblpoly", "lpolybb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.25, 1.03))
-bifluppoly.tssplot
-ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units = "in")
+        axis.title = element_blank())
+biflup.diffplot
 ```
+
+<!-- ##### L. polyphyllus -->
+<!-- ```{r bif lpoly} -->
+<!-- bifluppoly.evaldf <- bifluppoly.evaldf %>% -->
+<!--   bind_rows(biflup.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
+
+
+<!-- bifluppoly.auctest <- aov(AUC ~ model, data = bifluppoly.evaldf) -->
+<!-- summary(bifluppoly.auctest) -->
+<!-- TukeyHSD(bifluppoly.auctest) -->
+
+<!-- bifluppoly.aucplot <- ggplot(bifluppoly.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("bblpoly", "lpolybb", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- bifluppoly.aucplot -->
+<!-- ggsave("figures/bifluppoly-auc.png", bifluppoly.aucplot, width = 2.5, height = 4, units = "in") -->
+
+<!-- # TSS -->
+<!-- bifluppoly.tsstest <- aov(TSS ~ model, data = bifluppoly.evaldf) -->
+<!-- summary(bifluppoly.tsstest) -->
+<!-- TukeyHSD(bifluppoly.tsstest) -->
+
+<!-- bifluppoly.tssplot <- ggplot(bifluppoly.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("bblpoly", "lpolybb", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- bifluppoly.tssplot -->
+<!-- ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
+
+<!-- ##### L. bicolor -->
+<!-- ```{r bif lbicolor} -->
+<!-- biflupbicolor.evaldf <- biflupbicolor.evaldf %>% -->
+<!--   bind_rows(biflup.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
+
+
+<!-- biflupbicolor.auctest <- aov(AUC ~ model, data = biflupbicolor.evaldf) -->
+<!-- summary(biflupbicolor.auctest) -->
+<!-- TukeyHSD(biflupbicolor.auctest) -->
+
+<!-- biflupbicolor.aucplot <- ggplot(biflupbicolor.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("bblbicolor", "lbicolorbb", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- biflupbicolor.aucplot -->
+<!-- ggsave("figures/biflupbicolor-auc.png", biflupbicolor.aucplot, width = 2.5, height = 4, units = "in") -->
+
+<!-- # TSS -->
+<!-- biflupbicolor.tsstest <- aov(TSS ~ model, data = biflupbicolor.evaldf) -->
+<!-- summary(biflupbicolor.tsstest) -->
+<!-- TukeyHSD(biflupbicolor.tsstest) -->
+
+<!-- biflupbicolor.tssplot <- ggplot(biflupbicolor.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("bblbicolor", "lbicolorbb", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- biflupbicolor.tssplot -->
+<!-- ggsave("figures/biflupbicolor-tss.png", biflup.tssbicolorplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
 
 
 #### Penstemon
@@ -327,33 +401,86 @@ ggsave("figures/biflup-tss.png", biflup.tssplot, width = 2.5, height = 4, units 
 # AUC
 bifpen.auctest <- aov(AUC ~ model, data = bifpen.evaldf)
 summary(bifpen.auctest)
-TukeyHSD(bifpen.auctest)
 
 bifpen.aucplot <- ggplot(bifpen.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot()  +
-  scale_x_discrete(limit = c("bbp", "pbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 bifpen.aucplot
-ggsave("figures/bifpen-auc.png", bifpen.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifpen-auc.png", bifpen.aucplot, width = 2.5, height = 4, units = "in")
 
 
 # TSS
 bifpen.tsstest <- aov(TSS ~ model, data = bifpen.evaldf)
 summary(bifpen.tsstest)
-TukeyHSD(bifpen.tsstest)
 
 bifpen.tssplot <- ggplot(bifpen.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("bbp", "pbb", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 bifpen.tssplot
-ggsave("figures/bifpen-tss.png", bifpen.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/bifpen-tss.png", bifpen.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+
+```{r bifpen difference}
+bbpen.diff.t <- t.test(bifpen.diffdf$layer)
+bbpen.diff.t
+
+bifpen.diffplot <- ggplot(bifpen.diffdf %>% filter(!is.na(layer)), aes(y = layer)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank())
+bifpen.diffplot
+```
+
+#### Rubus
+```{r bifrub eval plots}
+# AUC
+bifrub.auctest <- aov(AUC ~ model, data = bifrub.evaldf)
+summary(bifrub.auctest)
+
+bifrub.aucplot <- ggplot(bifrub.evaldf, aes(x = model, y = AUC)) +
+  geom_boxplot()  +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.59, 1.03))
+bifrub.aucplot
+# ggsave("figures/bifrub-auc.png", bifrub.aucplot, width = 2.5, height = 4, units = "in")
+
+
+# TSS
+bifrub.tsstest <- aov(TSS ~ model, data = bifrub.evaldf)
+summary(bifrub.tsstest)
+
+bifrub.tssplot <- ggplot(bifrub.evaldf, aes(x = model, y = TSS)) + 
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.25, 1.03))
+bifrub.tssplot
+# ggsave("figures/bifrub-tss.png", bifrub.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r bifrub difference}
+bbrub.diff.t <- t.test(bifrub.diffdf$layer)
+bbrub.diff.t
+
+bifrub.diffplot <- ggplot(bifrub.diffdf %>% filter(!is.na(layer)), aes(y = layer)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank())
+bifrub.diffplot
 ```
 
 ### Flavifrons
@@ -362,32 +489,35 @@ ggsave("figures/bifpen-tss.png", bifpen.tssplot, width = 2.5, height = 4, units 
 # AUC
 flavcham.auctest <- aov(AUC ~ model, data = flavcham.evaldf)
 summary(flavcham.auctest)
-TukeyHSD(flavcham.auctest)
 
 flavcham.aucplot <- ggplot(flavcham.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbcham", "chambf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 flavcham.aucplot
-ggsave("figures/flavcham-auc.png", flavcham.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavcham-auc.png", flavcham.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 flavcham.tsstest <- aov(TSS ~ model, data = flavcham.evaldf)
 summary(flavcham.tsstest)
-TukeyHSD(flavcham.tsstest)
 
 flavcham.tssplot <- ggplot(flavcham.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbcham", "chambf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 flavcham.tssplot
-ggsave("figures/flavcham-tss.png", flavcham.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavcham-tss.png", flavcham.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r flavcham difference}
+fbcham.diff.t <- t.test(flavcham.diffdf$layer)
+fbcham.diff.t
 ```
 
 #### Cirsium
@@ -395,32 +525,35 @@ ggsave("figures/flavcham-tss.png", flavcham.tssplot, width = 2.5, height = 4, un
 # AUC
 flavcir.auctest <- aov(AUC ~ model, data = flavcir.evaldf)
 summary(flavcir.auctest)
-TukeyHSD(flavcir.auctest)
 
 flavcir.aucplot <- ggplot(flavcir.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbcir", "cirbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 flavcir.aucplot
-ggsave("figures/flavcir-auc.png", flavcir.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavcir-auc.png", flavcir.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 flavcir.tsstest <- aov(TSS ~ model, data = flavcir.evaldf)
 summary(flavcir.tsstest)
-TukeyHSD(flavcir.tsstest)
 
 flavcir.tssplot <- ggplot(flavcir.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbcir", "cirbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 flavcir.tssplot
-ggsave("figures/flavcir-tss.png", flavcir.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavcir-tss.png", flavcir.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r flavcir difference}
+fbcir.diff.t <- t.test(flavcir.diffdf$layer)
+fbcir.diff.t
 ```
 
 #### Lupinus
@@ -428,64 +561,71 @@ ggsave("figures/flavcir-tss.png", flavcir.tssplot, width = 2.5, height = 4, unit
 # AUC
 flavlup.auctest <- aov(AUC ~ model, data = flavlup.evaldf)
 summary(flavlup.auctest)
-TukeyHSD(flavlup.auctest)
 
 flavlup.aucplot <- ggplot(flavlup.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbl", "lbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 flavlup.aucplot
-ggsave("figures/flavlup-auc.png", flavlup.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavlup-auc.png", flavlup.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 flavlup.tsstest <- aov(TSS ~ model, data = flavlup.evaldf)
 summary(flavlup.tsstest)
-TukeyHSD(flavlup.tsstest)
 
 flavlup.tssplot <- ggplot(flavlup.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbl", "lbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 flavlup.tssplot
-ggsave("figures/flavlup-tss.png", flavlup.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavlup-tss.png", flavlup.tssplot, width = 2.5, height = 4, units = "in")
 ```
+
+```{r flavlup difference}
+fblup.diff.t <- t.test(flavlup.diffdf$layer)
+fblup.diff.t
+```
+
 #### Penstemon
 ```{r flavpen eval plots}
 # AUC
 flavpen.auctest <- aov(AUC ~ model, data = flavpen.evaldf)
 summary(flavpen.auctest)
-TukeyHSD(flavpen.auctest)
 
 flavpen.aucplot <- ggplot(flavpen.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbp", "pbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
 flavpen.aucplot
-ggsave("figures/flavpen-auc.png", flavpen.aucplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavpen-auc.png", flavpen.aucplot, width = 2.5, height = 4, units = "in")
 
 # TSS
 flavpen.tsstest <- aov(TSS ~ model, data = flavpen.evaldf)
 summary(flavpen.tsstest)
-TukeyHSD(flavpen.tsstest)
 
 flavpen.tssplot <- ggplot(flavpen.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbp", "pbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 flavpen.tssplot
-ggsave("figures/flavpen-tss.png", flavpen.tssplot, width = 2.5, height = 4, units = "in")
+# ggsave("figures/flavpen-tss.png", flavpen.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r flavpen difference}
+fbpen.diff.t <- t.test(flavpen.diffdf$layer)
+fbpen.diff.t
 ```
 
 #### Rubus
@@ -493,12 +633,10 @@ ggsave("figures/flavpen-tss.png", flavpen.tssplot, width = 2.5, height = 4, unit
 # AUC
 flavrub.auctest <- aov(AUC ~ model, data = flavrub.evaldf)
 summary(flavrub.auctest)
-TukeyHSD(flavrub.auctest)
 
 flavrub.aucplot <- ggplot(flavrub.evaldf, aes(x = model, y = AUC)) +
-  geom_boxplot() +
-  scale_x_discrete(limit = c("fbrub", "rubbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -508,17 +646,20 @@ ggsave("figures/flavrub-auc.png", flavrub.aucplot, width = 2.5, height = 4, unit
 # TSS
 flavrub.tsstest <- aov(TSS ~ model, data = flavrub.evaldf)
 summary(flavrub.tsstest)
-TukeyHSD(flavrub.tsstest)
 
 flavrub.tssplot <- ggplot(flavrub.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("fbrub", "rubbf", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 flavrub.tssplot
 ggsave("figures/flavrub-tss.png", flavrub.tssplot, width = 2.5, height = 4, units = "in")
+```
+```{r flavrub difference}
+fbrub.diff.t <- t.test(flavrub.diffdf$layer)
+fbrub.diff.t
 ```
 
 ### Mixtus
@@ -527,12 +668,11 @@ ggsave("figures/flavrub-tss.png", flavrub.tssplot, width = 2.5, height = 4, unit
 # AUC
 mixcham.auctest <- aov(AUC ~ model, data = mixcham.evaldf)
 summary(mixcham.auctest)
-TukeyHSD(mixcham.auctest)
 
 mixcham.aucplot <- ggplot(mixcham.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbcham", "chambm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -542,12 +682,11 @@ ggsave("figures/mixcham-auc.png", mixcham.aucplot, width = 2.5, height = 4, unit
 # TSS
 mixcham.tsstest <- aov(TSS ~ model, data = mixcham.evaldf)
 summary(mixcham.tsstest)
-TukeyHSD(mixcham.tsstest)
 
 mixcham.tssplot <- ggplot(mixcham.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbcham", "chambm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -555,17 +694,58 @@ mixcham.tssplot
 ggsave("figures/mixcham-tss.png", mixcham.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r mixcham difference}
+mbcham.diff.t <- t.test(mixcham.diffdf$layer)
+mbcham.diff.t
+```
+
+#### Chamaenerion
+```{r mixcir eval plots}
+# AUC
+mixcir.auctest <- aov(AUC ~ model, data = mixcir.evaldf)
+summary(mixcir.auctest)
+
+mixcir.aucplot <- ggplot(mixcir.evaldf, aes(x = model, y = AUC)) +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.59, 1.03))
+mixcir.aucplot
+# ggsave("figures/mixcir-auc.png", mixcir.aucplot, width = 2.5, height = 4, units = "in")
+
+# TSS
+mixcir.tsstest <- aov(TSS ~ model, data = mixcir.evaldf)
+summary(mixcir.tsstest)
+
+mixcir.tssplot <- ggplot(mixcir.evaldf, aes(x = model, y = TSS)) + 
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.25, 1.03))
+mixcir.tssplot
+# ggsave("figures/mixcir-tss.png", mixcir.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r mixcir difference}
+mbcir.diff.t <- t.test(mixcir.diffdf$layer)
+mbcir.diff.t
+```
+
 #### Lupinus
 ```{r mixlup eval plots}
 # AUC
 mixlup.auctest <- aov(AUC ~ model, data = mixlup.evaldf)
 summary(mixlup.auctest)
-TukeyHSD(mixlup.auctest)
 
 mixlup.aucplot <- ggplot(mixlup.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbl", "lbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -575,12 +755,12 @@ ggsave("figures/mixlup-auc.png", mixlup.aucplot, width = 2.5, height = 4, units 
 # TSS
 mixlup.tsstest <- aov(TSS ~ model, data = mixlup.evaldf)
 summary(mixlup.tsstest)
-TukeyHSD(mixlup.tsstest)
 
 mixlup.tssplot <- ggplot(mixlup.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbl", "lbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -588,17 +768,59 @@ mixlup.tssplot
 ggsave("figures/mixlup-tss.png", mixlup.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r mixlup difference}
+mblup.diff.t <- t.test(mixlup.diffdf$layer)
+mblup.diff.t
+```
+
+#### Penstemon
+```{r mixpen eval plots}
+# AUC
+mixpen.auctest <- aov(AUC ~ model, data = mixpen.evaldf)
+summary(mixpen.auctest)
+
+mixpen.aucplot <- ggplot(mixpen.evaldf, aes(x = model, y = AUC)) +
+  geom_boxplot() +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.59, 1.03))
+mixpen.aucplot
+ggsave("figures/mixpen-auc.png", mixpen.aucplot, width = 2.5, height = 4, units = "in")
+
+# TSS
+mixpen.tsstest <- aov(TSS ~ model, data = mixpen.evaldf)
+summary(mixpen.tsstest)
+
+mixpen.tssplot <- ggplot(mixpen.evaldf, aes(x = model, y = TSS)) + 
+  geom_boxplot() +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.25, 1.03))
+mixpen.tssplot
+ggsave("figures/mixpen-tss.png", mixpen.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+```{r mixpen difference}
+mbpen.diff.t <- t.test(mixpen.diffdf$layer)
+mbpen.diff.t
+```
+
 #### Rubus
 ```{r mixrub eval plots}
 # AUC
 mixrub.auctest <- aov(AUC ~ model, data = mixrub.evaldf)
 summary(mixrub.auctest)
-TukeyHSD(mixrub.auctest)
 
 mixrub.aucplot <- ggplot(mixrub.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbrub", "rubbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -608,12 +830,11 @@ ggsave("figures/mixrub-auc.png", mixrub.aucplot, width = 2.5, height = 4, units 
 # TSS
 mixrub.tsstest <- aov(TSS ~ model, data = mixrub.evaldf)
 summary(mixrub.tsstest)
-TukeyHSD(mixrub.tsstest)
 
 mixrub.tssplot <- ggplot(mixrub.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("mbrub", "rubbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -621,79 +842,84 @@ mixrub.tssplot
 ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
-##### R. spectabilis
-```{r mix rspec}
-mixrubspec.evaldf <- mixrubspec.evaldf %>%
-  bind_rows(mixrub.evaldf %>%
-              filter(model == "IDM"))
-
-# AUC
-mixrubspec.auctest <- aov(AUC ~ model, data = mixrubspec.evaldf)
-summary(mixrubspec.auctest)
-TukeyHSD(mixrubspec.auctest)
-
-mixrubspec.aucplot <- ggplot(mixrubspec.evaldf, aes(x = model, y = AUC)) +
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbrubspec", "rubspecbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.59, 1.03))
-mixrubspec.aucplot
-ggsave("figures/mixrub-auc.png", mixrub.aucplot, width = 2.5, height = 4, units = "in")
-
-# TSS
-mixrubspec.tsstest <- aov(TSS ~ model, data = mixrubspec.evaldf)
-summary(mixrubspec.tsstest)
-TukeyHSD(mixrubspec.tsstest)
-
-mixrubspec.tssplot <- ggplot(mixrubspec.evaldf, aes(x = model, y = TSS)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbrubspec", "rubspecbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.25, 1.03))
-mixrubspec.tssplot
-ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in")
+```{r mixrub difference}
+mbrub.diff.t <- t.test(mixrub.diffdf$layer)
+mbrub.diff.t
 ```
 
-##### R. parviflorus
-```{r mix rparv}
-mixrubparv.evaldf <- mixrubparv.evaldf %>%
-  bind_rows(mixrub.evaldf %>%
-              filter(model == "IDM"))
+<!-- ##### R. spectabilis -->
+<!-- ```{r mix rspec} -->
+<!-- mixrubspec.evaldf <- mixrubspec.evaldf %>% -->
+<!--   bind_rows(mixrub.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
 
-# AUC
-mixrubparv.auctest <- aov(AUC ~ model, data = mixrubparv.evaldf)
-summary(mixrubparv.auctest)
-TukeyHSD(mixrubparv.auctest)
+<!-- # AUC -->
+<!-- mixrubspec.auctest <- aov(AUC ~ model, data = mixrubspec.evaldf) -->
+<!-- summary(mixrubspec.auctest) -->
+<!-- TukeyHSD(mixrubspec.auctest) -->
 
-mixrubparv.aucplot <- ggplot(mixrubparv.evaldf, aes(x = model, y = AUC)) +
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbrubparv", "rubparvbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.59, 1.03))
-mixrubparv.aucplot
-ggsave("figures/mixrub-auc.png", mixrub.aucplot, width = 2.5, height = 4, units = "in")
+<!-- mixrubspec.aucplot <- ggplot(mixrubspec.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("mbrubspec", "rubspecbm", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- mixrubspec.aucplot -->
+<!-- ggsave("figures/mixrub-auc.png", mixrub.aucplot, width = 2.5, height = 4, units = "in") -->
 
-# TSS
-mixrubparv.tsstest <- aov(TSS ~ model, data = mixrubparv.evaldf)
-summary(mixrubparv.tsstest)
-TukeyHSD(mixrubparv.tsstest)
+<!-- # TSS -->
+<!-- mixrubspec.tsstest <- aov(TSS ~ model, data = mixrubspec.evaldf) -->
+<!-- summary(mixrubspec.tsstest) -->
+<!-- TukeyHSD(mixrubspec.tsstest) -->
 
-mixrubparv.tssplot <- ggplot(mixrubparv.evaldf, aes(x = model, y = TSS)) + 
-  geom_boxplot() +
-  scale_x_discrete(limit = c("mbrubparv", "rubparvbm", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
-  theme(axis.text.x = element_blank(),
-        axis.title = element_blank()) +
-  lims(y = c(0.25, 1.03))
-mixrubparv.tssplot
-ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in")
-```
+<!-- mixrubspec.tssplot <- ggplot(mixrubspec.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("mbrubspec", "rubspecbm", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- mixrubspec.tssplot -->
+<!-- ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
+
+<!-- ##### R. parviflorus -->
+<!-- ```{r mix rparv} -->
+<!-- mixrubparv.evaldf <- mixrubparv.evaldf %>% -->
+<!--   bind_rows(mixrub.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
+
+<!-- # AUC -->
+<!-- mixrubparv.auctest <- aov(AUC ~ model, data = mixrubparv.evaldf) -->
+<!-- summary(mixrubparv.auctest) -->
+<!-- TukeyHSD(mixrubparv.auctest) -->
+
+<!-- mixrubparv.aucplot <- ggplot(mixrubparv.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("mbrubparv", "rubparvbm", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- mixrubparv.aucplot -->
+<!-- ggsave("figures/mixrub-auc.png", mixrub.aucplot, width = 2.5, height = 4, units = "in") -->
+
+<!-- # TSS -->
+<!-- mixrubparv.tsstest <- aov(TSS ~ model, data = mixrubparv.evaldf) -->
+<!-- summary(mixrubparv.tsstest) -->
+<!-- TukeyHSD(mixrubparv.tsstest) -->
+
+<!-- mixrubparv.tssplot <- ggplot(mixrubparv.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("mbrubparv", "rubparvbm", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- mixrubparv.tssplot -->
+<!-- ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
 
 
 ### Vosnesenskii
@@ -702,12 +928,11 @@ ggsave("figures/mixrub-tss.png", mixrub.tssplot, width = 2.5, height = 4, units 
 # AUC
 voscham.auctest <- aov(AUC ~ model, data = voscham.evaldf)
 summary(voscham.auctest)
-TukeyHSD(voscham.auctest)
 
 voscham.aucplot <- ggplot(voscham.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbcham", "chambv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -717,12 +942,11 @@ ggsave("figures/voscham-auc.png", voscham.aucplot, width = 2.5, height = 4, unit
 # TSS
 voscham.tsstest <- aov(TSS ~ model, data = voscham.evaldf)
 summary(voscham.tsstest)
-TukeyHSD(voscham.tsstest)
 
 voscham.tssplot <- ggplot(voscham.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbcham", "chambv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -730,17 +954,21 @@ voscham.tssplot
 ggsave("figures/voscham-tss.png", voscham.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r voscham difference}
+vbcham.diff.t <- t.test(voscham.diffdf$layer)
+vbcham.diff.t
+```
+
 #### Cirsium
 ```{r voscir eval plots}
 # AUC
 voscir.auctest <- aov(AUC ~ model, data = voscir.evaldf)
 summary(voscir.auctest)
-TukeyHSD(voscir.auctest)
 
 voscir.aucplot <- ggplot(voscir.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbcir", "cirbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
  theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -750,12 +978,11 @@ ggsave("figures/voscir-auc.png", voscir.aucplot, width = 2.5, height = 4, units 
 # TSS
 voscir.tsstest <- aov(TSS ~ model, data = voscir.evaldf)
 summary(voscir.tsstest)
-TukeyHSD(voscir.tsstest)
 
 voscir.tssplot <- ggplot(voscir.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbcir", "cirbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -763,17 +990,21 @@ voscir.tssplot
 ggsave("figures/voscir-tss.png", voscir.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r voscir difference}
+vbcir.diff.t <- t.test(voscir.diffdf$layer)
+vbcir.diff.t
+```
+
 #### Lupinus
 ```{r voslup eval plots}
 # AUC
 voslup.auctest <- aov(AUC ~ model, data = voslup.evaldf)
 summary(voslup.auctest)
-TukeyHSD(voslup.auctest)
 
 voslup.aucplot <- ggplot(voslup.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbl", "lbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -783,30 +1014,105 @@ ggsave("figures/voslup-auc.png", voslup.aucplot, width = 2.5, height = 4, units 
 # TSS
 voslup.tsstest <- aov(TSS ~ model, data = voslup.evaldf)
 summary(voslup.tsstest)
-TukeyHSD(voslup.tsstest)
 
 voslup.tssplot <- ggplot(voslup.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbl", "lbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
 voslup.tssplot
 ggsave("figures/voslup-tss.png", voslup.tssplot, width = 2.5, height = 4, units = "in")
 ```
+```{r voslup difference}
+vblup.diff.t <- t.test(voslup.diffdf$layer)
+vblup.diff.t
+```
+
+<!-- ##### L. polyphyllus -->
+<!-- ```{r vosluppoly eval plots} -->
+<!-- vosluppoly.evaldf <- vosluppoly.evaldf %>% -->
+<!--   bind_rows(voslup.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
+
+<!-- # AUC -->
+<!-- vosluppoly.auctest <- aov(AUC ~ model, data = vosluppoly.evaldf) -->
+<!-- summary(vosluppoly.auctest) -->
+<!-- TukeyHSD(vosluppoly.auctest) -->
+
+<!-- vosluppoly.aucplot <- ggplot(vosluppoly.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("vblpoly", "lpolybv", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- vosluppoly.aucplot -->
+<!-- ggsave("figures/vosluppoly-auc.png", vosluppoly.aucplot, width = 2.5, height = 4, units = "in") -->
+
+<!-- # TSS -->
+<!-- vosluppoly.tsstest <- aov(TSS ~ model, data = vosluppoly.evaldf) -->
+<!-- summary(vosluppoly.tsstest) -->
+<!-- TukeyHSD(vosluppoly.tsstest) -->
+
+<!-- vosluppoly.tssplot <- ggplot(vosluppoly.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("vblpoly", "lpolybv", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- vosluppoly.tssplot -->
+<!-- ggsave("figures/vosluppoly-tss.png", vosluppoly.tssplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
+
+<!-- ##### L. bicolor -->
+<!-- ```{r vosluppoly eval plots} -->
+<!-- voslupbicolor.evaldf <- voslupbicolor.evaldf %>% -->
+<!--   bind_rows(voslup.evaldf %>% -->
+<!--               filter(model == "IDM")) -->
+
+<!-- # AUC -->
+<!-- voslupbicolor.auctest <- aov(AUC ~ model, data = voslupbicolor.evaldf) -->
+<!-- summary(voslupbicolor.auctest) -->
+<!-- TukeyHSD(voslupbicolor.auctest) -->
+
+<!-- voslupbicolor.aucplot <- ggplot(voslupbicolor.evaldf, aes(x = model, y = AUC)) + -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("vblbicolor", "lbicolorbv", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.59, 1.03)) -->
+<!-- voslupbicolor.aucplot -->
+<!-- ggsave("figures/voslupbicolor-auc.png", voslupbicolor.aucplot, width = 2.5, height = 4, units = "in") -->
+
+<!-- # TSS -->
+<!-- voslupbicolor.tsstest <- aov(TSS ~ model, data = voslupbicolor.evaldf) -->
+<!-- summary(voslupbicolor.tsstest) -->
+<!-- TukeyHSD(voslupbicolor.tsstest) -->
+
+<!-- voslupbicolor.tssplot <- ggplot(voslupbicolor.evaldf, aes(x = model, y = TSS)) +  -->
+<!--   geom_boxplot() + -->
+<!--   scale_x_discrete(limit = c("vblbicolor", "lbicolorbv", "IDM"), -->
+<!--                    labels = c("Plant First", "Bee First", "Interaction")) + -->
+<!--   theme(axis.text.x = element_blank(), -->
+<!--         axis.title = element_blank()) + -->
+<!--   lims(y = c(0.25, 1.03)) -->
+<!-- voslupbicolor.tssplot -->
+<!-- ggsave("figures/voslupbicolor-tss.png", voslupbicolor.tssplot, width = 2.5, height = 4, units = "in") -->
+<!-- ``` -->
 
 #### Penstemon
 ```{r vospen eval plots}
 # AUC
 vospen.auctest <- aov(AUC ~ model, data = vospen.evaldf)
 summary(vospen.auctest)
-TukeyHSD(vospen.auctest)
 
 vospen.aucplot <- ggplot(vospen.evaldf, aes(x = model, y = AUC)) +
-  geom_boxplot() +
-  scale_x_discrete(limit = c("vbp", "pbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -816,12 +1122,11 @@ ggsave("figures/vospen-auc.png", vospen.aucplot, width = 2.5, height = 4, units 
 # TSS
 vospen.tsstest <- aov(TSS ~ model, data = vospen.evaldf)
 summary(vospen.tsstest)
-TukeyHSD(vospen.tsstest)
 
 vospen.tssplot <- ggplot(vospen.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbp", "pbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -829,17 +1134,21 @@ vospen.tssplot
 ggsave("figures/vospen-tss.png", vospen.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r vospen difference}
+vbpen.diff.t <- t.test(vospen.diffdf$layer)
+vbpen.diff.t
+```
+
 #### Rubus
 ```{r vosrub eval plots}
 # AUC
 vosrub.auctest <- aov(AUC ~ model, data = vosrub.evaldf)
 summary(vosrub.auctest)
-TukeyHSD(vosrub.auctest)
 
 vosrub.aucplot <- ggplot(vosrub.evaldf, aes(x = model, y = AUC)) +
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbr", "rbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.59, 1.03))
@@ -849,12 +1158,11 @@ ggsave("figures/vosrub-auc.png", vosrub.aucplot, width = 2.5, height = 4, units 
 # TSS
 vosrub.tsstest <- aov(TSS ~ model, data = vosrub.evaldf)
 summary(vosrub.tsstest)
-TukeyHSD(vosrub.tsstest)
 
 vosrub.tssplot <- ggplot(vosrub.evaldf, aes(x = model, y = TSS)) + 
   geom_boxplot() +
-  scale_x_discrete(limit = c("vbr", "rbv", "IDM"),
-                   labels = c("Plant First", "Bee First", "Interaction")) +
+  scale_x_discrete(limit = c("overlap", "IDM"),
+                   labels = c("Overlap", "IDM")) +
   theme(axis.text.x = element_blank(),
         axis.title = element_blank()) +
   lims(y = c(0.25, 1.03))
@@ -862,6 +1170,86 @@ vosrub.tssplot
 ggsave("figures/vosrub-tss.png", vosrub.tssplot, width = 2.5, height = 4, units = "in")
 ```
 
+```{r vosrub difference}
+vbrub.diff.t <- t.test(vosrub.diffdf$layer)
+vbrub.diff.t
+```
+
+
+
+##### R. spectabilis
+```{r mix rspec}
+vosrubspec.evaldf <- vosrubspec.evaldf %>%
+  bind_rows(vosrub.evaldf %>%
+              filter(model == "IDM"))
+
+# AUC
+vosrubspec.auctest <- aov(AUC ~ model, data = vosrubspec.evaldf)
+summary(vosrubspec.auctest)
+TukeyHSD(vosrubspec.auctest)
+
+vosrubspec.aucplot <- ggplot(vosrubspec.evaldf, aes(x = model, y = AUC)) +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("vbrubspec", "rubspecbv", "IDM"),
+                   labels = c("Plant First", "Bee First", "Interaction")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.59, 1.03))
+vosrubspec.aucplot
+ggsave("figures/vosrubspec-auc.png", vosrubspec.aucplot, width = 2.5, height = 4, units = "in")
+
+# TSS
+vosrubspec.tsstest <- aov(TSS ~ model, data = vosrubspec.evaldf)
+summary(vosrubspec.tsstest)
+TukeyHSD(vosrubspec.tsstest)
+
+vosrubspec.tssplot <- ggplot(vosrubspec.evaldf, aes(x = model, y = TSS)) + 
+  geom_boxplot() +
+  scale_x_discrete(limit = c("vbrubspec", "rubspecbv", "IDM"),
+                   labels = c("Plant First", "Bee First", "Interaction")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.25, 1.03))
+vosrubspec.tssplot
+ggsave("figures/vosrubspec-tss.png", vosrubspec.tssplot, width = 2.5, height = 4, units = "in")
+```
+
+##### R. parviflorus
+```{r vos rparv}
+vosrubparv.evaldf <- vosrubparv.evaldf %>%
+  bind_rows(vosrub.evaldf %>%
+              filter(model == "IDM"))
+
+# AUC
+vosrubparv.auctest <- aov(AUC ~ model, data = vosrubparv.evaldf)
+summary(vosrubparv.auctest)
+TukeyHSD(vosrubparv.auctest)
+
+vosrubparv.aucplot <- ggplot(vosrubparv.evaldf, aes(x = model, y = AUC)) +
+  geom_boxplot() +
+  scale_x_discrete(limit = c("vbrubparv", "rubparvbv", "IDM"),
+                   labels = c("Plant First", "Bee First", "Interaction")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.59, 1.03))
+vosrubparv.aucplot
+ggsave("figures/vosrubparv-auc.png", vosrubparv.aucplot, width = 2.5, height = 4, units = "in")
+
+# TSS
+vosrubparv.tsstest <- aov(TSS ~ model, data = vosrubparv.evaldf)
+summary(vosrubparv.tsstest)
+TukeyHSD(vosrubparv.tsstest)
+
+vosrubparv.tssplot <- ggplot(vosrubparv.evaldf, aes(x = model, y = TSS)) + 
+  geom_boxplot() +
+  scale_x_discrete(limit = c("vbrubparv", "rubparvbv", "IDM"),
+                   labels = c("Plant First", "Bee First", "Interaction")) +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank()) +
+  lims(y = c(0.25, 1.03))
+vosrubparv.tssplot
+ggsave("figures/vosrubparv-tss.png", vosrubparv.tssplot, width = 2.5, height = 4, units = "in")
+```
 
 ## Relative Difference in Model Performance
 
@@ -870,13 +1258,13 @@ Here, we want to see how we can determine whether an IDM would be better than an
 *AUC*: 
 
 ```{r relative stats}
-auc.test <- glmmTMB(delta_AUC ~ relabund_int + n_plant_species + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+auc.test <- glmmTMB(delta_AUC ~ relabund_int + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
 check_collinearity(auc.test)
 check_overdispersion(auc.test)
 plot(simulateResiduals(auc.test))
 summary(auc.test)
 
-tss.test <- glmmTMB(delta_TSS ~ relabund_int + n_plant_species + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
+tss.test <- glmmTMB(delta_TSS ~ relabund_int + n_plant_records + n_bee_records + (1|bee_species) + (1|plant_genus), data = int.df, family = gaussian)
 check_collinearity(tss.test)
 check_overdispersion(tss.test)
 plot(simulateResiduals(auc.test))
