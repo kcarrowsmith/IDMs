@@ -224,6 +224,46 @@ write.csv(bifcham.evaldf, file = "completed-evals/bifcham-eval.csv")
 write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
 saveRDS(bifcham.overlaplist, file = "bifcham-overlaps.RData")
 saveRDS(bifcham.idmlist, file = "bifcham-idms.RData")
+
+# Some extra code to figure out threshold stuff. Will integrate into the main for loop later.
+
+bifcham.overlapthresh <- vector(mode = "list", length = 100)
+bifcham.idmthresh <- vector(mode = "list", length = 100)
+bifcham.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = bifcham.overlaplist[[i]]
+  tstar.overlap = (bifcham.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  bifcham.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = bifcham.idmlist[[i]]
+  tstar.idm = (bifcham.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  bifcham.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  bifcham.thresholddf = bind_rows(bifcham.thresholddf, shared.df)
+}
 ```
 
 Here, we will build an ensemble of the 100 runs of the overlap and IDM, so I can look at them next to each other.
@@ -393,6 +433,47 @@ write.csv(bifcir.evaldf, file = "completed-evals/bifcir-eval.csv")
 write.csv(bifcir.varimpdf, file = "completed-evals/bifcir-varimport.csv")
 saveRDS(bifcir.overlaplist, file = "bifcir-overlaps.RData")
 saveRDS(bifcir.idmlist, file = "bifcir-idms.RData")
+
+
+# Some extra code to figure out threshold stuff. Will integrate into the main for loop later.
+
+bifcir.overlapthresh <- vector(mode = "list", length = 100)
+bifcir.idmthresh <- vector(mode = "list", length = 100)
+bifcir.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = bifcir.overlaplist[[i]]
+  tstar.overlap = (bifcir.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  bifcir.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = bifcir.idmlist[[i]]
+  tstar.idm = (bifcir.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  bifcir.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  bifcir.thresholddf = bind_rows(bifcir.thresholddf, shared.df)
+}
 ```
 
 
@@ -574,6 +655,44 @@ write.csv(biflup.evaldf, file = "completed-evals/biflup-eval.csv")
 write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
 saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
 saveRDS(biflup.idmlist, file = "biflup-idms.RData")
+
+biflup.overlapthresh <- vector(mode = "list", length = 100)
+biflup.idmthresh <- vector(mode = "list", length = 100)
+biflup.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = biflup.overlaplist[[i]]
+  tstar.overlap = (biflup.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  biflup.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = biflup.idmlist[[i]]
+  tstar.idm = (biflup.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  biflup.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  biflup.thresholddf = bind_rows(biflup.thresholddf, shared.df)
+}
 ```
 
 ```{r biflup ensemble}
@@ -1015,6 +1134,44 @@ write.csv(bifpen.evaldf, file = "completed-evals/bifpen-eval.csv")
 write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
 saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
 saveRDS(biflup.idmlist, file = "biflup-idms.RData")
+
+bifpen.overlapthresh <- vector(mode = "list", length = 100)
+bifpen.idmthresh <- vector(mode = "list", length = 100)
+bifpen.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = bifpen.overlaplist[[i]]
+  tstar.overlap = (bifpen.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  bifpen.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = bifpen.idmlist[[i]]
+  tstar.idm = (bifpen.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  bifpen.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  bifpen.thresholddf = bind_rows(bifpen.thresholddf, shared.df)
+}
 ```
 
 ```{r bifpen ensemble}
@@ -1180,6 +1337,44 @@ write.csv(bifrub.diffdf, file = "completed-evals/bifrub-diff.csv")
 write.csv(bifrub.varimpdf, file = "completed-evals/bifrub-varimport.csv")
 saveRDS(bifrub.overlaplist, file = "bifrub-overlaps.RData")
 saveRDS(bifrub.idmlist, file = "bifrub-idms.RData")
+
+bifrub.overlapthresh <- vector(mode = "list", length = 100)
+bifrub.idmthresh <- vector(mode = "list", length = 100)
+bifrub.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = bifrub.overlaplist[[i]]
+  tstar.overlap = (bifrub.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  bifrub.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = bifrub.idmlist[[i]]
+  tstar.idm = (bifrub.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  bifrub.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  bifrub.thresholddf = bind_rows(bifrub.thresholddf, shared.df)
+}
 ```
 
 ```{r bifrub ensemble}
@@ -1346,9 +1541,47 @@ write.csv(flavcham.diffdf, file = "completed-evals/flavcham-diff.csv")
 write.csv(flavcham.varimpdf, file = "completed-evals/flavcham-varimport.csv")
 saveRDS(flavcham.overlaplist, file = "flavcham-overlaps.RData")
 saveRDS(flavcham.idmlist, file = "flavcham-idms.RData")
+
+flavcham.overlapthresh <- vector(mode = "list", length = 100)
+flavcham.idmthresh <- vector(mode = "list", length = 100)
+flavcham.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = flavcham.overlaplist[[i]]
+  tstar.overlap = (flavcham.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  flavcham.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = flavcham.idmlist[[i]]
+  tstar.idm = (flavcham.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  flavcham.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  flavcham.thresholddf = bind_rows(flavcham.thresholddf, shared.df)
+}
 ```
 
-```{r bifrub ensemble}
+```{r flavrub ensemble}
 flavcham.overlap.ensemble <- raster(mean(rast(flavcham.overlaplist[c(1:100)])))
 flavcham.overlap.spdf <- as(flavcham.overlap.ensemble, "SpatialPixelsDataFrame")
 flavcham.overlap.df <- as.data.frame(flavcham.overlap.spdf)
@@ -1511,6 +1744,44 @@ write.csv(flavcir.diffdf, file = "completed-evals/flavcir-diff.csv")
 write.csv(flavcir.varimpdf, file = "completed-evals/flavcir-varimport.csv")
 saveRDS(flavcir.overlaplist, file = "flavcir-overlaps.RData")
 saveRDS(flavcir.idmlist, file = "flavcir-idms.RData")
+
+flavcir.overlapthresh <- vector(mode = "list", length = 100)
+flavcir.idmthresh <- vector(mode = "list", length = 100)
+flavcir.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = flavcir.overlaplist[[i]]
+  tstar.overlap = (flavcir.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  flavcir.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = flavcir.idmlist[[i]]
+  tstar.idm = (flavcir.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  flavcir.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  flavcir.thresholddf = bind_rows(flavcir.thresholddf, shared.df)
+}
 ```
 
 ```{r flavcir ensemble}
@@ -1677,6 +1948,44 @@ write.csv(flavlup.diffdf, file = "completed-evals/flavlup-diff.csv")
 write.csv(flavlup.varimpdf, file = "completed-evals/flavlup-varimport.csv")
 saveRDS(flavlup.overlaplist, file = "flavlup-overlaps.RData")
 saveRDS(flavlup.idmlist, file = "flavlup-idms.RData")
+
+flavlup.overlapthresh <- vector(mode = "list", length = 100)
+flavlup.idmthresh <- vector(mode = "list", length = 100)
+flavlup.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = flavlup.overlaplist[[i]]
+  tstar.overlap = (flavlup.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  flavlup.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = flavlup.idmlist[[i]]
+  tstar.idm = (flavlup.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  flavlup.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  flavlup.thresholddf = bind_rows(flavlup.thresholddf, shared.df)
+}
 ```
 
 ```{r flavlup ensemble}
@@ -1842,6 +2151,44 @@ write.csv(flavpen.diffdf, file = "completed-evals/flavpen-diff.csv")
 write.csv(flavpen.varimpdf, file = "completed-evals/flavpen-varimport.csv")
 saveRDS(flavpen.overlaplist, file = "flavpen-overlaps.RData")
 saveRDS(flavpen.idmlist, file = "flavpen-idms.RData")
+
+flavpen.overlapthresh <- vector(mode = "list", length = 100)
+flavpen.idmthresh <- vector(mode = "list", length = 100)
+flavpen.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = flavpen.overlaplist[[i]]
+  tstar.overlap = (flavpen.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  flavpen.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = flavpen.idmlist[[i]]
+  tstar.idm = (flavpen.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  flavpen.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  flavpen.thresholddf = bind_rows(flavpen.thresholddf, shared.df)
+}
 ```
 
 ```{r flavpen ensemble}
@@ -2007,6 +2354,44 @@ write.csv(flavrub.diffdf, file = "completed-evals/flavrub-diff.csv")
 write.csv(flavrub.varimpdf, file = "completed-evals/flavrub-varimport.csv")
 saveRDS(flavrub.overlaplist, file = "flavrub-overlaps.RData")
 saveRDS(flavrub.idmlist, file = "flavrub-idms.RData")
+
+flavrub.overlapthresh <- vector(mode = "list", length = 100)
+flavrub.idmthresh <- vector(mode = "list", length = 100)
+flavrub.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = flavrub.overlaplist[[i]]
+  tstar.overlap = (flavrub.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  flavrub.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = flavrub.idmlist[[i]]
+  tstar.idm = (flavrub.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  flavrub.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  flavrub.thresholddf = bind_rows(flavrub.thresholddf, shared.df)
+}
 ```
 
 ```{r flavrub ensemble}
@@ -2174,6 +2559,44 @@ write.csv(mixcham.diffdf, file = "completed-evals/mixcham-diff.csv")
 write.csv(mixcham.varimpdf, file = "completed-evals/mixcham-varimport.csv")
 saveRDS(mixcham.overlaplist, file = "mixcham-overlaps.RData")
 saveRDS(mixcham.idmlist, file = "mixcham-idms.RData")
+
+mixcham.overlapthresh <- vector(mode = "list", length = 100)
+mixcham.idmthresh <- vector(mode = "list", length = 100)
+mixcham.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = mixcham.overlaplist[[i]]
+  tstar.overlap = (mixcham.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  mixcham.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = mixcham.idmlist[[i]]
+  tstar.idm = (mixcham.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  mixcham.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  mixcham.thresholddf = bind_rows(mixcham.thresholddf, shared.df)
+}
 ```
 
 ```{r mixcham ensemble}
@@ -2340,6 +2763,44 @@ write.csv(mixcir.diffdf, file = "completed-evals/mixcir-diff.csv")
 write.csv(mixcir.varimpdf, file = "completed-evals/mixcir-varimport.csv")
 saveRDS(mixcir.overlaplist, file = "mixcir-overlaps.RData")
 saveRDS(mixcir.idmlist, file = "mixcir-idms.RData")
+
+mixcir.overlapthresh <- vector(mode = "list", length = 100)
+mixcir.idmthresh <- vector(mode = "list", length = 100)
+mixcir.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = mixcir.overlaplist[[i]]
+  tstar.overlap = (mixcir.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  mixcir.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = mixcir.idmlist[[i]]
+  tstar.idm = (mixcir.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  mixcir.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  mixcir.thresholddf = bind_rows(mixcir.thresholddf, shared.df)
+}
 ```
 
 ```{r mixcir ensemble}
@@ -2506,6 +2967,44 @@ write.csv(mixlup.diffdf, file = "completed-evals/mixlup-diff.csv")
 write.csv(mixlup.varimpdf, file = "completed-evals/mixlup-varimport.csv")
 saveRDS(mixlup.overlaplist, file = "mixlup-overlaps.RData")
 saveRDS(mixlup.idmlist, file = "mixlup-idms.RData")
+
+mixlup.overlapthresh <- vector(mode = "list", length = 100)
+mixlup.idmthresh <- vector(mode = "list", length = 100)
+mixlup.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = mixlup.overlaplist[[i]]
+  tstar.overlap = (mixlup.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  mixlup.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = mixlup.idmlist[[i]]
+  tstar.idm = (mixlup.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  mixlup.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  mixlup.thresholddf = bind_rows(mixlup.thresholddf, shared.df)
+}
 ```
 
 ```{r mixlup ensemble}
@@ -2672,6 +3171,44 @@ write.csv(mixpen.diffdf, file = "completed-evals/mixpen-diff.csv")
 write.csv(mixpen.varimpdf, file = "completed-evals/mixpen-varimport.csv")
 saveRDS(mixpen.overlaplist, file = "mixpen-overlaps.RData")
 saveRDS(mixpen.idmlist, file = "mixpen-idms.RData")
+
+mixpen.overlapthresh <- vector(mode = "list", length = 100)
+mixpen.idmthresh <- vector(mode = "list", length = 100)
+mixpen.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = mixpen.overlaplist[[i]]
+  tstar.overlap = (mixpen.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  mixpen.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = mixpen.idmlist[[i]]
+  tstar.idm = (mixpen.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  mixpen.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  mixpen.thresholddf = bind_rows(mixpen.thresholddf, shared.df)
+}
 ```
 
 ```{r mixpen ensemble}
@@ -2838,6 +3375,44 @@ write.csv(mixrub.diffdf, file = "completed-evals/mixrub-diff.csv")
 write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
 saveRDS(mixrub.overlaplist, file = "mixrub-overlaps.RData")
 saveRDS(mixrub.idmlist, file = "mixrub-idms.RData")
+
+mixrub.overlapthresh <- vector(mode = "list", length = 100)
+mixrub.idmthresh <- vector(mode = "list", length = 100)
+mixrub.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = mixrub.overlaplist[[i]]
+  tstar.overlap = (mixrub.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  mixrub.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = mixrub.idmlist[[i]]
+  tstar.idm = (mixrub.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  mixrub.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  mixrub.thresholddf = bind_rows(mixrub.thresholddf, shared.df)
+}
 ```
 
 ```{r mixrub ensemble}
@@ -3264,6 +3839,44 @@ write.csv(voscham.diffdf, file = "completed-evals/voscham-diff.csv")
 write.csv(voscham.varimpdf, file = "completed-evals/voscham-varimport.csv")
 saveRDS(voscham.overlaplist, file = "voscham-overlaps.RData")
 saveRDS(voscham.idmlist, file = "voscham-idms.RData")
+
+voscham.overlapthresh <- vector(mode = "list", length = 100)
+voscham.idmthresh <- vector(mode = "list", length = 100)
+voscham.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = voscham.overlaplist[[i]]
+  tstar.overlap = (voscham.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  voscham.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = voscham.idmlist[[i]]
+  tstar.idm = (voscham.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  voscham.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  voscham.thresholddf = bind_rows(voscham.thresholddf, shared.df)
+}
 ```
 
 ```{r voscham ensemble}
@@ -3430,6 +4043,44 @@ write.csv(voscir.diffdf, file = "completed-evals/voscir-diff.csv")
 write.csv(voscir.varimpdf, file = "completed-evals/voscir-varimport.csv")
 saveRDS(voscir.overlaplist, file = "voscir-overlaps.RData")
 saveRDS(voscir.idmlist, file = "voscir-idms.RData")
+
+voscir.overlapthresh <- vector(mode = "list", length = 100)
+voscir.idmthresh <- vector(mode = "list", length = 100)
+voscir.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = voscir.overlaplist[[i]]
+  tstar.overlap = (voscir.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  voscir.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = voscir.idmlist[[i]]
+  tstar.idm = (voscir.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  voscir.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  voscir.thresholddf = bind_rows(voscir.thresholddf, shared.df)
+}
 ```
 
 ```{r voscir ensemble}
@@ -3596,6 +4247,44 @@ write.csv(voslup.diffdf, file = "completed-evals/voslup-diff.csv")
 write.csv(voslup.varimpdf, file = "completed-evals/voslup-varimport.csv")
 saveRDS(voslup.overlaplist, file = "voslup-overlaps.RData")
 saveRDS(voslup.idmlist, file = "voslup-idms.RData")
+
+voslup.overlapthresh <- vector(mode = "list", length = 100)
+voslup.idmthresh <- vector(mode = "list", length = 100)
+voslup.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = voslup.overlaplist[[i]]
+  tstar.overlap = (voslup.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  voslup.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = voslup.idmlist[[i]]
+  tstar.idm = (voslup.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  voslup.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  voslup.thresholddf = bind_rows(voslup.thresholddf, shared.df)
+}
 ```
 
 ```{r voslup ensemble}
@@ -4003,6 +4692,44 @@ write.csv(vospen.diffdf, file = "completed-evals/vospen-diff.csv")
 write.csv(vospen.varimpdf, file = "completed-evals/vospen-varimport.csv")
 saveRDS(vospen.overlaplist, file = "vospen-overlaps.RData")
 saveRDS(vospen.idmlist, file = "vospen-idms.RData")
+
+vospen.overlapthresh <- vector(mode = "list", length = 100)
+vospen.idmthresh <- vector(mode = "list", length = 100)
+vospen.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = vospen.overlaplist[[i]]
+  tstar.overlap = (vospen.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  vospen.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = vospen.idmlist[[i]]
+  tstar.idm = (vospen.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  vospen.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  vospen.thresholddf = bind_rows(vospen.thresholddf, shared.df)
+}
 ```
 
 ```{r vospen ensemble}
@@ -4169,6 +4896,44 @@ write.csv(vosrub.diffdf, file = "completed-evals/vosrub-diff.csv")
 write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
 saveRDS(vosrub.overlaplist, file = "vosrub-overlaps.RData")
 saveRDS(vosrub.idmlist, file = "vosrub-idms.RData")
+
+vosrub.overlapthresh <- vector(mode = "list", length = 100)
+vosrub.idmthresh <- vector(mode = "list", length = 100)
+vosrub.thresholddf <- data.frame()
+
+for(i in 1:100){
+  overlap = vosrub.overlaplist[[i]]
+  tstar.overlap = (vosrub.evaldf %>%
+    filter(run == i,
+           model == "overlap"))$tstar
+  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh[overlap.thresh > tstar.overlap] = 1
+  overlap.thresh[overlap.thresh <= tstar.overlap] = 0
+  vosrub.overlapthresh[[i]] = overlap.thresh
+  
+  
+  idm = vosrub.idmlist[[i]]
+  tstar.idm = (vosrub.evaldf %>%
+    filter(run == i,
+           model == "IDM"))$tstar
+  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh[idm.thresh > tstar.idm] = 1
+  idm.thresh[idm.thresh <= tstar.idm] = 0
+  vosrub.idmthresh[[i]] = idm.thresh
+  
+  shared = overlap.thresh + idm.thresh
+  diff = idm.thresh - overlap.thresh
+  
+  shared.df = data.frame(run = i,
+                         n_shared = length(shared[shared == 2]),
+                         n_IDM = length(diff[diff == 1]),
+                         n_overlap = length(diff[diff == -1])) %>%
+    mutate(prop.shared = n_shared/(n_shared + n_IDM + n_overlap),
+           prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
+           prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
+  
+  vosrub.thresholddf = bind_rows(vosrub.thresholddf, shared.df)
+}
 ```
 
 ```{r vosrub ensemble}
