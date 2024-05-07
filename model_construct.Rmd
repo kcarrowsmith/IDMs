@@ -99,10 +99,10 @@ bifcham <- bbna %>%
 ```
 
 ```{r bifcham maxent for loop, message = F}
+bifcham.overlaplist <- vector(mode = "list", length = 100)
+bifcham.idmlist <- vector(mode = "list", length = 100)
+
 bifcham.evaldf <- data.frame()
-
-bifcham.diffdf <- data.frame()
-
 bifcham.varimpdf <- data.frame()
 
 set.seed(121023)
@@ -160,6 +160,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   bifcham.overlap <- as(bif.predict * cham.predict, "SpatRaster")
+  bifcham.overlaplist[[i]] = bifcham.overlap
   
   
   
@@ -169,40 +170,90 @@ for(i in 1:100){
                           a = bg.train)
   
   bifcham.idm <- as(dismo::predict(bifcham.maxent, stack(bioclim)), "SpatRaster")
+  bifcham.idmlist[[i]] = bifcham.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (bifcham.overlap - bifcham.idm)[])
-
-  bifcham.diffdf <- bind_rows(bifcham.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   bifcham.overlap.auc <- AUC(obs = bifcham.test, pred = bifcham.overlap)
   bifcham.idm.auc <- AUC(obs = bifcham.test, pred = bifcham.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  bifcham.overlap.tssdf <- bifcham.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifcham.overlap.tstar <- which.max(bifcham.overlap.tssdf$TSS)
+  bifcham.idm.tssdf <- bifcham.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifcham.idm.tstar <- which.max(bifcham.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   bifcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = bifcham.overlap.auc$AUC,
-                        TSS = max(bifcham.overlap.auc$thresholds$sensitivity + bifcham.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(bifcham.overlap.tssdf$TSS),
+                        tstar = bifcham.overlap.tssdf[bifcham.overlap.tstar, 1],
+                        sens_star = bifcham.overlap.tssdf[bifcham.overlap.tstar, 4],
+                        spec_star = bifcham.overlap.tssdf[bifcham.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(bifcham.idm)), na.omit(values(bifcham.overlap)), na.rm = T))
 
   bifcham.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = bifcham.idm.auc$AUC,
-                        TSS = max(bifcham.idm.auc$thresholds$sensitivity + bifcham.idm.auc$thresholds$specificity - 1))
+                        TSS = max(bifcham.idm.tssdf$TSS),
+                        tstar = bifcham.idm.tssdf[bifcham.idm.tstar, 1],
+                        sens_star = bifcham.idm.tssdf[bifcham.idm.tstar, 4],
+                        spec_star = bifcham.idm.tssdf[bifcham.idm.tstar, 5])
   
   bifcham.evaldf = bind_rows(bifcham.evaldf, bifcham.overlap.eval, bifcham.idm.eval)
+  
+  # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(bifcham.maxent@results[7:26,]),
+                        percent = bifcham.maxent@results[7:26],
+                        permutation = bifcham.maxent@results[27:46])
+  
+  bifcham.varimpdf = bind_rows(bifcham.varimpdf, idm.vars)
 }
 
 write.csv(bifcham.diffdf, file = "completed-evals/bifcham-diff.csv")
 write.csv(bifcham.evaldf, file = "completed-evals/bifcham-eval.csv")
-# write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
+write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
+saveRDS(bifcham.overlaplist, file = "bifcham-overlaps.RData")
+saveRDS(bifcham.idmlist, file = "bifcham-idms.RData")
 ```
+
+Here, we will build an ensemble of the 100 runs of the overlap and IDM, so I can look at them next to each other.
+
+```{r bifcham ensemble}
+bifcham.overlap.ensemble <- raster(mean(rast(bifcham.overlaplist[c(1:100)])))
+bifcham.overlap.spdf <- as(bifcham.overlap.ensemble, "SpatialPixelsDataFrame")
+bifcham.overlap.df <- as.data.frame(bifcham.overlap.spdf)
+
+bifcham.overlap.plot <- ggplot() +
+  geom_tile(data = bifcham.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifcham-overlap.png", bifcham.overlap.plot, width = 6, height = 4, units = "in")
+
+bifcham.idm.ensemble <- raster(mean(rast(bifcham.idmlist[c(1:100)])))
+bifcham.idm.spdf <- as(bifcham.idm.ensemble, "SpatialPixelsDataFrame")
+bifcham.idm.df <- as.data.frame(bifcham.idm.spdf)
+
+bifcham.idm.plot <- ggplot() +
+  geom_tile(data = bifcham.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifcham-idm.png", bifcham.idm.plot, width = 6, height = 4, units = "in")
+```
+
 
 ## Cirsium
 
@@ -217,10 +268,10 @@ bifcir <- bbna %>%
 ```
 
 ```{r bifcir maxent for loop, message = F}
+bifcir.overlaplist <- vector(mode = "list", length = 100)
+bifcir.idmlist <- vector(mode = "list", length = 100)
+
 bifcir.evaldf <- data.frame()
-
-bifcir.diffdf <- data.frame()
-
 bifcir.varimpdf <- data.frame()
 
 set.seed(7840126)
@@ -278,6 +329,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   bifcir.overlap <- as(bif.predict * cir.predict, "SpatRaster")
+  bifcir.overlaplist[[i]] = bifcir.overlap
   
   
   
@@ -287,39 +339,87 @@ for(i in 1:100){
                           a = bg.train)
   
   bifcir.idm <- as(dismo::predict(bifcir.maxent, stack(bioclim)), "SpatRaster")
+  bifcir.idmlist[[i]] = bifcir.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (bifcir.overlap - bifcir.idm)[])
-
-  bifcir.diffdf <- bind_rows(bifcir.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   bifcir.overlap.auc <- AUC(obs = bifcir.test, pred = bifcir.overlap)
   bifcir.idm.auc <- AUC(obs = bifcir.test, pred = bifcir.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  bifcir.overlap.tssdf <- bifcir.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifcir.overlap.tstar <- which.max(bifcir.overlap.tssdf$TSS)
+  bifcir.idm.tssdf <- bifcir.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifcir.idm.tstar <- which.max(bifcir.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   bifcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = bifcir.overlap.auc$AUC,
-                        TSS = max(bifcir.overlap.auc$thresholds$sensitivity + bifcir.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(bifcir.overlap.tssdf$TSS),
+                        tstar = bifcir.overlap.tssdf[bifcir.overlap.tstar, 1],
+                        sens_star = bifcir.overlap.tssdf[bifcir.overlap.tstar, 4],
+                        spec_star = bifcir.overlap.tssdf[bifcir.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(bifcir.idm)), na.omit(values(bifcir.overlap)), na.rm = T))
 
   bifcir.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = bifcir.idm.auc$AUC,
-                        TSS = max(bifcir.idm.auc$thresholds$sensitivity + bifcir.idm.auc$thresholds$specificity - 1))
+                        TSS = max(bifcir.idm.tssdf$TSS),
+                        tstar = bifcir.idm.tssdf[bifcir.idm.tstar, 1],
+                        sens_star = bifcir.idm.tssdf[bifcir.idm.tstar, 4],
+                        spec_star = bifcir.idm.tssdf[bifcir.idm.tstar, 5])
   
   bifcir.evaldf = bind_rows(bifcir.evaldf, bifcir.overlap.eval, bifcir.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(bifcir.maxent@results[7:26,]),
+                        percent = bifcir.maxent@results[7:26],
+                        permutation = bifcir.maxent@results[27:46])
+  
+  bifcir.varimpdf = bind_rows(bifcir.varimpdf, idm.vars)
 }
 
 write.csv(bifcir.diffdf, file = "completed-evals/bifcir-diff.csv")
 write.csv(bifcir.evaldf, file = "completed-evals/bifcir-eval.csv")
-# write.csv(bifcir.varimpdf, file = "completed-evals/bifcir-varimport.csv")
+write.csv(bifcir.varimpdf, file = "completed-evals/bifcir-varimport.csv")
+saveRDS(bifcir.overlaplist, file = "bifcir-overlaps.RData")
+saveRDS(bifcir.idmlist, file = "bifcir-idms.RData")
+```
+
+
+```{r bifcir ensemble}
+bifcir.overlap.ensemble <- raster(mean(rast(bifcir.overlaplist[c(1:100)])))
+bifcir.overlap.spdf <- as(bifcir.overlap.ensemble, "SpatialPixelsDataFrame")
+bifcir.overlap.df <- as.data.frame(bifcir.overlap.spdf)
+
+bifcir.overlap.plot <- ggplot() +
+  geom_tile(data = bifcir.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifcir-overlap.png", bifcir.overlap.plot, width = 6, height = 4, units = "in")
+
+bifcir.idm.ensemble <- raster(mean(rast(bifcir.idmlist[c(1:100)])))
+bifcir.idm.spdf <- as(bifcir.idm.ensemble, "SpatialPixelsDataFrame")
+bifcir.idm.df <- as.data.frame(bifcir.idm.spdf)
+
+bifcir.idm.plot <- ggplot() +
+  geom_tile(data = bifcir.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifcir-idm.png", bifcir.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Lupinus
@@ -339,10 +439,10 @@ biflup <- bbna %>%
 Here we have a for-loop running MaxEnt models 100 times. For each run, we will select new training and test data, calculate overlaps, and calculate an IDM. We then save the evaluation metrics (AUC, TSS) in a dataframe to assess the performance of the different methods.
 
 ```{r biflup maxent for loop, message = F}
+biflup.overlaplist <- vector(mode = "list", length = 100)
+biflup.idmlist <- vector(mode = "list", length = 100)
+
 biflup.evaldf <- data.frame()
-
-biflup.diffdf <- data.frame()
-
 biflup.varimpdf <- data.frame()
 
 set.seed(122223)
@@ -410,6 +510,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   biflup.overlap <- as(bif.predict * lup.predict, "SpatRaster")
+  biflup.overlaplist[[i]] = biflup.overlap
   
   
   
@@ -419,39 +520,86 @@ for(i in 1:100){
                           a = bg.train)
   
   biflup.idm <- as(dismo::predict(biflup.maxent, stack(bioclim)), "SpatRaster")
+  biflup.idmlist[[i]] = biflup.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (biflup.overlap - biflup.idm)[])
-
-  biflup.diffdf <- bind_rows(biflup.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   biflup.overlap.auc <- AUC(obs = biflup.test, pred = biflup.overlap)
   biflup.idm.auc <- AUC(obs = biflup.test, pred = biflup.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  biflup.overlap.tssdf <- biflup.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  biflup.overlap.tstar <- which.max(biflup.overlap.tssdf$TSS)
+  biflup.idm.tssdf <- biflup.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  biflup.idm.tstar <- which.max(biflup.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   biflup.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = biflup.overlap.auc$AUC,
-                        TSS = max(biflup.overlap.auc$thresholds$sensitivity + biflup.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(biflup.overlap.tssdf$TSS),
+                        tstar = biflup.overlap.tssdf[biflup.overlap.tstar, 1],
+                        sens_star = biflup.overlap.tssdf[biflup.overlap.tstar, 4],
+                        spec_star = biflup.overlap.tssdf[biflup.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(biflup.idm)), na.omit(values(biflup.overlap)), na.rm = T))
 
   biflup.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = biflup.idm.auc$AUC,
-                        TSS = max(biflup.idm.auc$thresholds$sensitivity + biflup.idm.auc$thresholds$specificity - 1))
+                        TSS = max(biflup.idm.tssdf$TSS),
+                        tstar = biflup.idm.tssdf[biflup.idm.tstar, 1],
+                        sens_star = biflup.idm.tssdf[biflup.idm.tstar, 4],
+                        spec_star = biflup.idm.tssdf[biflup.idm.tstar, 5])
   
   biflup.evaldf = bind_rows(biflup.evaldf, biflup.overlap.eval, biflup.idm.eval)
+  
+    # Step 5: Save variable importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(biflup.maxent@results[7:26,]),
+                        percent = biflup.maxent@results[7:26],
+                        permutation = biflup.maxent@results[27:46])
+  
+  biflup.varimpdf = bind_rows(biflup.varimpdf, idm.vars)
 }
 
 write.csv(biflup.diffdf, file = "completed-evals/biflup-diff.csv")
 write.csv(biflup.evaldf, file = "completed-evals/biflup-eval.csv")
-# write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
+write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
+saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
+saveRDS(biflup.idmlist, file = "biflup-idms.RData")
+```
+
+```{r biflup ensemble}
+biflup.overlap.ensemble <- raster(mean(rast(biflup.overlaplist[c(1:100)])))
+biflup.overlap.spdf <- as(biflup.overlap.ensemble, "SpatialPixelsDataFrame")
+biflup.overlap.df <- as.data.frame(biflup.overlap.spdf)
+
+biflup.overlap.plot <- ggplot() +
+  geom_tile(data = biflup.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/biflup-overlap.png", biflup.overlap.plot, width = 6, height = 4, units = "in")
+
+biflup.idm.ensemble <- raster(mean(rast(biflup.idmlist[c(1:100)])))
+biflup.idm.spdf <- as(biflup.idm.ensemble, "SpatialPixelsDataFrame")
+biflup.idm.df <- as.data.frame(biflup.idm.spdf)
+
+biflup.idm.plot <- ggplot() +
+  geom_tile(data = biflup.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/biflup-idm.png", biflup.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 <!-- ### L. polyphyllus -->
@@ -742,10 +890,10 @@ bifpen <- bbna %>%
 ```
 
 ```{r bifpen maxent for loop, message = F}
+bifpen.overlaplist <- vector(mode = "list", length = 100)
+bifpen.idmlist <- vector(mode = "list", length = 100)
+
 bifpen.evaldf <- data.frame()
-
-bifpen.diffdf <- data.frame()
-
 bifpen.varimpdf <- data.frame()
 
 set.seed(122323)
@@ -803,6 +951,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   bifpen.overlap <- as(bif.predict * pen.predict, "SpatRaster")
+  bifpen.overlaplist[[i]] = bifpen.overlap
   
   
   
@@ -812,43 +961,90 @@ for(i in 1:100){
                           a = bg.train)
   
   bifpen.idm <- as(dismo::predict(bifpen.maxent, stack(bioclim)), "SpatRaster")
+  bifpen.idmlist[[i]] = bifpen.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (bifpen.overlap - bifpen.idm)[])
-
-  bifpen.diffdf <- bind_rows(bifpen.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   bifpen.overlap.auc <- AUC(obs = bifpen.test, pred = bifpen.overlap)
   bifpen.idm.auc <- AUC(obs = bifpen.test, pred = bifpen.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  bifpen.overlap.tssdf <- bifpen.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifpen.overlap.tstar <- which.max(bifpen.overlap.tssdf$TSS)
+  bifpen.idm.tssdf <- bifpen.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifpen.idm.tstar <- which.max(bifpen.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   bifpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = bifpen.overlap.auc$AUC,
-                        TSS = max(bifpen.overlap.auc$thresholds$sensitivity + bifpen.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(bifpen.overlap.tssdf$TSS),
+                        tstar = bifpen.overlap.tssdf[bifpen.overlap.tstar, 1],
+                        sens_star = bifpen.overlap.tssdf[bifpen.overlap.tstar, 4],
+                        spec_star = bifpen.overlap.tssdf[bifpen.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(bifpen.idm)), na.omit(values(bifpen.overlap)), na.rm = T))
 
   bifpen.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = bifpen.idm.auc$AUC,
-                        TSS = max(bifpen.idm.auc$thresholds$sensitivity + bifpen.idm.auc$thresholds$specificity - 1))
+                        TSS = max(bifpen.idm.tssdf$TSS),
+                        tstar = bifpen.idm.tssdf[bifpen.idm.tstar, 1],
+                        sens_star = bifpen.idm.tssdf[bifpen.idm.tstar, 4],
+                        spec_star = bifpen.idm.tssdf[bifpen.idm.tstar, 5])
   
   bifpen.evaldf = bind_rows(bifpen.evaldf, bifpen.overlap.eval, bifpen.idm.eval)
+  
+    # Step 5: Save variable importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(bifpen.maxent@results[7:26,]),
+                        percent = bifpen.maxent@results[7:26],
+                        permutation = bifpen.maxent@results[27:46])
+  
+  bifpen.varimpdf = bind_rows(bifpen.varimpdf, idm.vars)
 }
 
 write.csv(bifpen.diffdf, file = "completed-evals/bifpen-diff.csv")
 write.csv(bifpen.evaldf, file = "completed-evals/bifpen-eval.csv")
-# write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
+write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
+saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
+saveRDS(biflup.idmlist, file = "biflup-idms.RData")
+```
+
+```{r bifpen ensemble}
+bifpen.overlap.ensemble <- raster(mean(rast(bifpen.overlaplist[c(1:100)])))
+bifpen.overlap.spdf <- as(bifpen.overlap.ensemble, "SpatialPixelsDataFrame")
+bifpen.overlap.df <- as.data.frame(bifpen.overlap.spdf)
+
+bifpen.overlap.plot <- ggplot() +
+  geom_tile(data = bifpen.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifpen-overlap.png", bifpen.overlap.plot, width = 6, height = 4, units = "in")
+
+bifpen.idm.ensemble <- raster(mean(rast(bifpen.idmlist[c(1:100)])))
+bifpen.idm.spdf <- as(bifpen.idm.ensemble, "SpatialPixelsDataFrame")
+bifpen.idm.df <- as.data.frame(bifpen.idm.spdf)
+
+bifpen.idm.plot <- ggplot() +
+  geom_tile(data = bifpen.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifpen-idm.png", bifpen.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Rubus
-```{r flav rub data, message = F}
+```{r bif rub data, message = F}
 gbif.rub <- gbif %>%
   filter(genus == "Rubus")
 
@@ -858,11 +1054,11 @@ bifrub <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r flavrub maxent for loop, message = F}
+```{r bifrub maxent for loop, message = F}
+bifrub.overlaplist <- vector(mode = "list", length = 100)
+bifrub.idmlist <- vector(mode = "list", length = 100)
+
 bifrub.evaldf <- data.frame()
-
-bifrub.diffdf <- data.frame()
-
 bifrub.varimpdf <- data.frame()
 
 set.seed(429024)
@@ -920,6 +1116,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   bifrub.overlap <- as(bif.predict * rub.predict, "SpatRaster")
+  bifrub.overlaplist[[i]] = bifrub.overlap
   
   
   
@@ -928,40 +1125,87 @@ for(i in 1:100){
                           p = bifrub.train, 
                           a = bg.train)
   
-  bifrub.idm <- as(dismo::predict(bifrub.maxent, stack(bioclim)), "SpatRaster")
+  bifrub.idm <- as(dismo::predict(bifcir.maxent, stack(bioclim)), "SpatRaster")
+  bifrub.idmlist[[i]] = bifrub.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (bifrub.overlap - bifrub.idm)[])
-
-  bifrub.diffdf <- bind_rows(bifrub.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   bifrub.overlap.auc <- AUC(obs = bifrub.test, pred = bifrub.overlap)
   bifrub.idm.auc <- AUC(obs = bifrub.test, pred = bifrub.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  bifrub.overlap.tssdf <- bifrub.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifrub.overlap.tstar <- which.max(bifrub.overlap.tssdf$TSS)
+  bifrub.idm.tssdf <- bifrub.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  bifrub.idm.tstar <- which.max(bifrub.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   bifrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = bifrub.overlap.auc$AUC,
-                        TSS = max(bifrub.overlap.auc$thresholds$sensitivity + bifrub.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(bifrub.overlap.tssdf$TSS),
+                        tstar = bifrub.overlap.tssdf[bifrub.overlap.tstar, 1],
+                        sens_star = bifrub.overlap.tssdf[bifrub.overlap.tstar, 4],
+                        spec_star = bifrub.overlap.tssdf[bifrub.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(bifrub.idm)), na.omit(values(bifrub.overlap)), na.rm = T))
 
   bifrub.idm.eval = data.frame(run = i,
                         model = "IDM",
-                        AUC = bifrub.idm.auc$AUC,
-                        TSS = max(bifrub.idm.auc$thresholds$sensitivity + bifrub.idm.auc$thresholds$specificity - 1))
+                        AUC = bifcir.idm.auc$AUC,
+                        TSS = max(bifrub.idm.tssdf$TSS),
+                        tstar = bifrub.idm.tssdf[bifrub.idm.tstar, 1],
+                        sens_star = bifrub.idm.tssdf[bifrub.idm.tstar, 4],
+                        spec_star = bifrub.idm.tssdf[bifrub.idm.tstar, 5])
   
   bifrub.evaldf = bind_rows(bifrub.evaldf, bifrub.overlap.eval, bifrub.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(bifrub.maxent@results[7:26,]),
+                        percent = bifrub.maxent@results[7:26],
+                        permutation = bifrub.maxent@results[27:46])
+  
+  bifrub.varimpdf = bind_rows(bifrub.varimpdf, idm.vars)
 }
 
 write.csv(bifrub.evaldf, file = "completed-evals/bifrub-eval.csv")
 write.csv(bifrub.diffdf, file = "completed-evals/bifrub-diff.csv")
-#write.csv(bifrub.varimpdf, file = "completed-evals/bifrub-varimport.csv")
+write.csv(bifrub.varimpdf, file = "completed-evals/bifrub-varimport.csv")
+saveRDS(bifrub.overlaplist, file = "bifrub-overlaps.RData")
+saveRDS(bifrub.idmlist, file = "bifrub-idms.RData")
+```
+
+```{r bifrub ensemble}
+bifrub.overlap.ensemble <- raster(mean(rast(bifrub.overlaplist[c(1:100)])))
+bifrub.overlap.spdf <- as(bifrub.overlap.ensemble, "SpatialPixelsDataFrame")
+bifrub.overlap.df <- as.data.frame(bifrub.overlap.spdf)
+
+bifrub.overlap.plot <- ggplot() +
+  geom_tile(data = bifrub.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifrub-overlap.png", bifrub.overlap.plot, width = 6, height = 4, units = "in")
+
+bifrub.idm.ensemble <- raster(mean(rast(bifrub.idmlist[c(1:100)])))
+bifrub.idm.spdf <- as(bifrub.idm.ensemble, "SpatialPixelsDataFrame")
+bifrub.idm.df <- as.data.frame(bifrub.idm.spdf)
+
+bifrub.idm.plot <- ggplot() +
+  geom_tile(data = bifrub.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/bifrub-idm.png", bifrub.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 # Flavifrons
@@ -977,8 +1221,10 @@ flavcham <- bbna %>%
 ```
 
 ```{r flavcham maxent for loop, message = F}
+flavcham.overlaplist <- vector(mode = "list", length = 100)
+flavcham.idmlist <- vector(mode = "list", length = 100)
+
 flavcham.evaldf <- data.frame()
-flavcham.diffdf <- data.frame()
 flavcham.varimpdf <- data.frame()
 
 set.seed(15124)
@@ -1036,6 +1282,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   flavcham.overlap <- as(flav.predict * cham.predict, "SpatRaster")
+  flavcham.overlaplist[[i]] = flavcham.overlap
   
   
   
@@ -1045,39 +1292,86 @@ for(i in 1:100){
                           a = bg.train)
   
   flavcham.idm <- as(dismo::predict(flavcham.maxent, stack(bioclim)), "SpatRaster")
+  flavcham.idmlist[[i]] = flavcham.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (flavcham.overlap - flavcham.idm)[])
-
-  flavcham.diffdf <- bind_rows(flavcham.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   flavcham.overlap.auc <- AUC(obs = flavcham.test, pred = flavcham.overlap)
   flavcham.idm.auc <- AUC(obs = flavcham.test, pred = flavcham.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  flavcham.overlap.tssdf <- flavcham.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavcham.overlap.tstar <- which.max(flavcham.overlap.tssdf$TSS)
+  flavcham.idm.tssdf <- flavcham.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavcham.idm.tstar <- which.max(flavcham.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   flavcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = flavcham.overlap.auc$AUC,
-                        TSS = max(flavcham.overlap.auc$thresholds$sensitivity + flavcham.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(flavcham.overlap.tssdf$TSS),
+                        tstar = flavcham.overlap.tssdf[flavcham.overlap.tstar, 1],
+                        sens_star = flavcham.overlap.tssdf[flavcham.overlap.tstar, 4],
+                        spec_star = flavcham.overlap.tssdf[flavcham.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(flavcham.idm)), na.omit(values(flavcham.overlap)), na.rm = T))
 
   flavcham.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = flavcham.idm.auc$AUC,
-                        TSS = max(flavcham.idm.auc$thresholds$sensitivity + flavcham.idm.auc$thresholds$specificity - 1))
+                        TSS = max(flavcham.idm.tssdf$TSS),
+                        tstar = flavcham.idm.tssdf[flavcham.idm.tstar, 1],
+                        sens_star = flavcham.idm.tssdf[flavcham.idm.tstar, 4],
+                        spec_star = flavcham.idm.tssdf[flavcham.idm.tstar, 5])
   
   flavcham.evaldf = bind_rows(flavcham.evaldf, flavcham.overlap.eval, flavcham.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(flavcham.maxent@results[7:26,]),
+                        percent = flavcham.maxent@results[7:26],
+                        permutation = flavcham.maxent@results[27:46])
+  
+  flavcham.varimpdf = bind_rows(flavcham.varimpdf, idm.vars)
 }
 
 write.csv(flavcham.evaldf, file = "completed-evals/flavcham-eval.csv")
 write.csv(flavcham.diffdf, file = "completed-evals/flavcham-diff.csv")
 write.csv(flavcham.varimpdf, file = "completed-evals/flavcham-varimport.csv")
+saveRDS(flavcham.overlaplist, file = "flavcham-overlaps.RData")
+saveRDS(flavcham.idmlist, file = "flavcham-idms.RData")
+```
+
+```{r bifrub ensemble}
+flavcham.overlap.ensemble <- raster(mean(rast(flavcham.overlaplist[c(1:100)])))
+flavcham.overlap.spdf <- as(flavcham.overlap.ensemble, "SpatialPixelsDataFrame")
+flavcham.overlap.df <- as.data.frame(flavcham.overlap.spdf)
+
+flavcham.overlap.plot <- ggplot() +
+  geom_tile(data = flavcham.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavcham-overlap.png", flavcham.overlap.plot, width = 6, height = 4, units = "in")
+
+flavcham.idm.ensemble <- raster(mean(rast(flavcham.idmlist[c(1:100)])))
+flavcham.idm.spdf <- as(flavcham.idm.ensemble, "SpatialPixelsDataFrame")
+flavcham.idm.df <- as.data.frame(flavcham.idm.spdf)
+
+flavcham.idm.plot <- ggplot() +
+  geom_tile(data = flavcham.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavcham-idm.png", flavcham.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Cirsium
@@ -1092,8 +1386,10 @@ flavcir <- bbna %>%
 ```
 
 ```{r flavcir maxent for loop, message = F}
+flavcir.overlaplist <- vector(mode = "list", length = 100)
+flavcir.idmlist <- vector(mode = "list", length = 100)
+
 flavcir.evaldf <- data.frame()
-flavcir.diffdf <- data.frame()
 flavcir.varimpdf <- data.frame()
 
 set.seed(163190)
@@ -1151,6 +1447,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   flavcir.overlap <- as(flav.predict * cir.predict, "SpatRaster")
+  flavcir.overlaplist[[i]] = flavcir.overlap
   
   
   
@@ -1160,41 +1457,87 @@ for(i in 1:100){
                           a = bg.train)
   
   flavcir.idm <- as(dismo::predict(flavcir.maxent, stack(bioclim)), "SpatRaster")
+  flavcir.idmlist[[i]] = flavcir.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (flavcir.overlap - flavcir.idm)[])
-
-  flavcir.diffdf <- bind_rows(flavcir.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   flavcir.overlap.auc <- AUC(obs = flavcir.test, pred = flavcir.overlap)
   flavcir.idm.auc <- AUC(obs = flavcir.test, pred = flavcir.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  flavcir.overlap.tssdf <- flavcir.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavcir.overlap.tstar <- which.max(flavcir.overlap.tssdf$TSS)
+  flavcir.idm.tssdf <- flavcir.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavcir.idm.tstar <- which.max(flavcir.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   flavcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = flavcir.overlap.auc$AUC,
-                        TSS = max(flavcir.overlap.auc$thresholds$sensitivity + flavcir.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(flavcir.overlap.tssdf$TSS),
+                        tstar = flavcir.overlap.tssdf[flavcir.overlap.tstar, 1],
+                        sens_star = flavcir.overlap.tssdf[flavcir.overlap.tstar, 4],
+                        spec_star = flavcir.overlap.tssdf[flavcir.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(flavcir.idm)), na.omit(values(flavcir.overlap)), na.rm = T))
 
   flavcir.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = flavcir.idm.auc$AUC,
-                        TSS = max(flavcir.idm.auc$thresholds$sensitivity + flavcir.idm.auc$thresholds$specificity - 1))
+                        TSS = max(flavcir.idm.tssdf$TSS),
+                        tstar = flavcir.idm.tssdf[flavcir.idm.tstar, 1],
+                        sens_star = flavcir.idm.tssdf[flavcir.idm.tstar, 4],
+                        spec_star = flavcir.idm.tssdf[flavcir.idm.tstar, 5])
   
   flavcir.evaldf = bind_rows(flavcir.evaldf, flavcir.overlap.eval, flavcir.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(flavcir.maxent@results[7:26,]),
+                        percent = flavcir.maxent@results[7:26],
+                        permutation = flavcir.maxent@results[27:46])
+  
+  flavcir.varimpdf = bind_rows(flavcir.varimpdf, idm.vars)
 }
 
 write.csv(flavcir.evaldf, file = "completed-evals/flavcir-eval.csv")
 write.csv(flavcir.diffdf, file = "completed-evals/flavcir-diff.csv")
-# write.csv(flavcir.varimpdf, file = "completed-evals/flavcir-varimport.csv")
+write.csv(flavcir.varimpdf, file = "completed-evals/flavcir-varimport.csv")
+saveRDS(flavcir.overlaplist, file = "flavcir-overlaps.RData")
+saveRDS(flavcir.idmlist, file = "flavcir-idms.RData")
 ```
 
+```{r flavcir ensemble}
+flavcir.overlap.ensemble <- raster(mean(rast(flavcir.overlaplist[c(1:100)])))
+flavcir.overlap.spdf <- as(flavcir.overlap.ensemble, "SpatialPixelsDataFrame")
+flavcir.overlap.df <- as.data.frame(flavcir.overlap.spdf)
+
+flavcir.overlap.plot <- ggplot() +
+  geom_tile(data = flavcir.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavcir-overlap.png", flavcir.overlap.plot, width = 6, height = 4, units = "in")
+
+flavcir.idm.ensemble <- raster(mean(rast(flavcir.idmlist[c(1:100)])))
+flavcir.idm.spdf <- as(flavcir.idm.ensemble, "SpatialPixelsDataFrame")
+flavcir.idm.df <- as.data.frame(flavcir.idm.spdf)
+
+flavcir.idm.plot <- ggplot() +
+  geom_tile(data = flavcir.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavcir-idm.png", flavcir.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Lupinus
 
@@ -1209,10 +1552,10 @@ flavlup <- bbna %>%
 ```
 
 ```{r flavlup maxent for loop, message = F}
+flavlup.overlaplist <- vector(mode = "list", length = 100)
+flavlup.idmlist <- vector(mode = "list", length = 100)
+
 flavlup.evaldf <- data.frame()
-
-flavlup.diffdf <- data.frame()
-
 flavlup.varimpdf <- data.frame()
 
 set.seed(11624)
@@ -1270,6 +1613,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   flavlup.overlap <- as(flav.predict * lup.predict, "SpatRaster")
+  flavlup.overlaplist[[i]] = flavlup.overlap
   
   
   
@@ -1279,39 +1623,86 @@ for(i in 1:100){
                           a = bg.train)
   
   flavlup.idm <- as(dismo::predict(flavlup.maxent, stack(bioclim)), "SpatRaster")
+  flavlup.idmlist[[i]] = flavlup.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (flavlup.overlap - flavlup.idm)[])
-
-  flavlup.diffdf <- bind_rows(flavlup.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   flavlup.overlap.auc <- AUC(obs = flavlup.test, pred = flavlup.overlap)
   flavlup.idm.auc <- AUC(obs = flavlup.test, pred = flavlup.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  flavlup.overlap.tssdf <- flavlup.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavlup.overlap.tstar <- which.max(flavlup.overlap.tssdf$TSS)
+  flavlup.idm.tssdf <- flavlup.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavlup.idm.tstar <- which.max(flavlup.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   flavlup.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = flavlup.overlap.auc$AUC,
-                        TSS = max(flavlup.overlap.auc$thresholds$sensitivity + flavlup.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(flavlup.overlap.tssdf$TSS),
+                        tstar = flavcham.overlap.tssdf[flavlup.overlap.tstar, 1],
+                        sens_star = flavlup.overlap.tssdf[flavlup.overlap.tstar, 4],
+                        spec_star = flavlup.overlap.tssdf[flavlup.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(flavlup.idm)), na.omit(values(flavlup.overlap)), na.rm = T))
 
   flavlup.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = flavlup.idm.auc$AUC,
-                        TSS = max(flavlup.idm.auc$thresholds$sensitivity + flavlup.idm.auc$thresholds$specificity - 1))
+                        TSS = max(flavlup.idm.tssdf$TSS),
+                        tstar = flavlup.idm.tssdf[flavlup.idm.tstar, 1],
+                        sens_star = flavlup.idm.tssdf[flavlup.idm.tstar, 4],
+                        spec_star = flavlup.idm.tssdf[flavlup.idm.tstar, 5])
   
   flavlup.evaldf = bind_rows(flavlup.evaldf, flavlup.overlap.eval, flavlup.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(flavlup.maxent@results[7:26,]),
+                        percent = flavlup.maxent@results[7:26],
+                        permutation = flavlup.maxent@results[27:46])
+  
+  flavlup.varimpdf = bind_rows(flavlup.varimpdf, idm.vars)
 }
 
 write.csv(flavlup.evaldf, file = "completed-evals/flavlup-eval.csv")
 write.csv(flavlup.diffdf, file = "completed-evals/flavlup-diff.csv")
-#write.csv(flavlup.varimpdf, file = "completed-evals/flavlup-varimport.csv")
+write.csv(flavlup.varimpdf, file = "completed-evals/flavlup-varimport.csv")
+saveRDS(flavlup.overlaplist, file = "flavlup-overlaps.RData")
+saveRDS(flavlup.idmlist, file = "flavlup-idms.RData")
+```
+
+```{r flavlup ensemble}
+flavlup.overlap.ensemble <- raster(mean(rast(flavlup.overlaplist[c(1:100)])))
+flavlup.overlap.spdf <- as(flavlup.overlap.ensemble, "SpatialPixelsDataFrame")
+flavlup.overlap.df <- as.data.frame(flavlup.overlap.spdf)
+
+flavlup.overlap.plot <- ggplot() +
+  geom_tile(data = flavlup.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavlup-overlap.png", flavlup.overlap.plot, width = 6, height = 4, units = "in")
+
+flavlup.idm.ensemble <- raster(mean(rast(flavlup.idmlist[c(1:100)])))
+flavlup.idm.spdf <- as(flavlup.idm.ensemble, "SpatialPixelsDataFrame")
+flavlup.idm.df <- as.data.frame(flavlup.idm.spdf)
+
+flavlup.idm.plot <- ggplot() +
+  geom_tile(data = flavlup.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavlup-idm.png", flavlup.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Penstemon
@@ -1326,10 +1717,10 @@ flavpen <- bbna %>%
 ```
 
 ```{r flavpen maxent for loop, message = F}
+flavpen.overlaplist <- vector(mode = "list", length = 100)
+flavpen.idmlist <- vector(mode = "list", length = 100)
+
 flavpen.evaldf <- data.frame()
-
-flavpen.diffdf <- data.frame()
-
 flavpen.varimpdf <- data.frame()
 
 set.seed(11124)
@@ -1387,6 +1778,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   flavpen.overlap <- as(flav.predict * pen.predict, "SpatRaster")
+  flavpen.overlaplist[[i]] = flavpen.overlap
   
   
   
@@ -1396,41 +1788,87 @@ for(i in 1:100){
                           a = bg.train)
   
   flavpen.idm <- as(dismo::predict(flavpen.maxent, stack(bioclim)), "SpatRaster")
+  flavpen.idmlist[[i]] = flavpen.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (flavpen.overlap - flavpen.idm)[])
-
-  flavpen.diffdf <- bind_rows(flavpen.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   flavpen.overlap.auc <- AUC(obs = flavpen.test, pred = flavpen.overlap)
   flavpen.idm.auc <- AUC(obs = flavpen.test, pred = flavpen.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  flavpen.overlap.tssdf <- flavpen.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavpen.overlap.tstar <- which.max(flavpen.overlap.tssdf$TSS)
+  flavpen.idm.tssdf <- flavpen.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavpen.idm.tstar <- which.max(flavpen.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   flavpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = flavpen.overlap.auc$AUC,
-                        TSS = max(flavpen.overlap.auc$thresholds$sensitivity + flavpen.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(flavpen.overlap.tssdf$TSS),
+                        tstar = flavpen.overlap.tssdf[flavpen.overlap.tstar, 1],
+                        sens_star = flavpen.overlap.tssdf[flavpen.overlap.tstar, 4],
+                        spec_star = flavpen.overlap.tssdf[flavpen.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(flavpen.idm)), na.omit(values(flavpen.overlap)), na.rm = T))
 
   flavpen.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = flavpen.idm.auc$AUC,
-                        TSS = max(flavpen.idm.auc$thresholds$sensitivity + flavpen.idm.auc$thresholds$specificity - 1))
+                        TSS = max(flavpen.idm.tssdf$TSS),
+                        tstar = flavpen.idm.tssdf[flavpen.idm.tstar, 1],
+                        sens_star = flavpen.idm.tssdf[flavpen.idm.tstar, 4],
+                        spec_star = flavpen.idm.tssdf[flavpen.idm.tstar, 5])
   
   flavpen.evaldf = bind_rows(flavpen.evaldf, flavpen.overlap.eval, flavpen.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(flavpen.maxent@results[7:26,]),
+                        percent = flavpen.maxent@results[7:26],
+                        permutation = flavpen.maxent@results[27:46])
+  
+  flavpen.varimpdf = bind_rows(flavpen.varimpdf, idm.vars)
 }
 
 write.csv(flavpen.evaldf, file = "completed-evals/flavpen-eval.csv")
 write.csv(flavpen.diffdf, file = "completed-evals/flavpen-diff.csv")
-#write.csv(flavpen.varimpdf, file = "completed-evals/flavpen-varimport.csv")
+write.csv(flavpen.varimpdf, file = "completed-evals/flavpen-varimport.csv")
+saveRDS(flavpen.overlaplist, file = "flavpen-overlaps.RData")
+saveRDS(flavpen.idmlist, file = "flavpen-idms.RData")
 ```
 
+```{r flavpen ensemble}
+flavpen.overlap.ensemble <- raster(mean(rast(flavpen.overlaplist[c(1:100)])))
+flavpen.overlap.spdf <- as(flavpen.overlap.ensemble, "SpatialPixelsDataFrame")
+flavpen.overlap.df <- as.data.frame(flavpen.overlap.spdf)
+
+flavpen.overlap.plot <- ggplot() +
+  geom_tile(data = flavpen.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavpen-overlap.png", flavpen.overlap.plot, width = 6, height = 4, units = "in")
+
+flavpen.idm.ensemble <- raster(mean(rast(flavpen.idmlist[c(1:100)])))
+flavpen.idm.spdf <- as(flavpen.idm.ensemble, "SpatialPixelsDataFrame")
+flavpen.idm.df <- as.data.frame(flavpen.idm.spdf)
+
+flavpen.idm.plot <- ggplot() +
+  geom_tile(data = flavpen.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavpen-idm.png", flavpen.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Rubus
 ```{r flav rub data, message = F}
@@ -1444,10 +1882,10 @@ flavrub <- bbna %>%
 ```
 
 ```{r flavrub maxent for loop, message = F}
+flavrub.overlaplist <- vector(mode = "list", length = 100)
+flavrub.idmlist <- vector(mode = "list", length = 100)
+
 flavrub.evaldf <- data.frame()
-
-flavrub.diffdf <- data.frame()
-
 flavrub.varimpdf <- data.frame()
 
 set.seed(160124)
@@ -1505,6 +1943,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   flavrub.overlap <- as(flav.predict * rub.predict, "SpatRaster")
+  flavrub.overlaplist[[i]] = flavrub.overlap
   
   
   
@@ -1514,42 +1953,87 @@ for(i in 1:100){
                           a = bg.train)
   
   flavrub.idm <- as(dismo::predict(flavrub.maxent, stack(bioclim)), "SpatRaster")
+  flavrub.idmlist[[i]] = flavrub.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (flavrub.overlap - flavrub.idm)[])
-
-  flavrub.diffdf <- bind_rows(flavrub.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   flavrub.overlap.auc <- AUC(obs = flavrub.test, pred = flavrub.overlap)
   flavrub.idm.auc <- AUC(obs = flavrub.test, pred = flavrub.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  flavrub.overlap.tssdf <- flavrub.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavrub.overlap.tstar <- which.max(flavrub.overlap.tssdf$TSS)
+  flavrub.idm.tssdf <- flavrub.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  flavrub.idm.tstar <- which.max(flavrub.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   flavrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = flavrub.overlap.auc$AUC,
-                        TSS = max(flavrub.overlap.auc$thresholds$sensitivity + flavrub.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(flavrub.overlap.tssdf$TSS),
+                        tstar = flavrub.overlap.tssdf[flavrub.overlap.tstar, 1],
+                        sens_star = flavrub.overlap.tssdf[flavrub.overlap.tstar, 4],
+                        spec_star = flavrub.overlap.tssdf[flavrub.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(flavrub.idm)), na.omit(values(flavrub.overlap)), na.rm = T))
 
   flavrub.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = flavrub.idm.auc$AUC,
-                        TSS = max(flavrub.idm.auc$thresholds$sensitivity + flavrub.idm.auc$thresholds$specificity - 1))
+                        TSS = max(flavrub.idm.tssdf$TSS),
+                        tstar = flavrub.idm.tssdf[flavrub.idm.tstar, 1],
+                        sens_star = flavrub.idm.tssdf[flavrub.idm.tstar, 4],
+                        spec_star = flavrub.idm.tssdf[flavrub.idm.tstar, 5])
   
   flavrub.evaldf = bind_rows(flavrub.evaldf, flavrub.overlap.eval, flavrub.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(flavrub.maxent@results[7:26,]),
+                        percent = flavrub.maxent@results[7:26],
+                        permutation = flavrub.maxent@results[27:46])
+  
+  flavrub.varimpdf = bind_rows(flavrub.varimpdf, idm.vars)
 }
 
 write.csv(flavrub.evaldf, file = "completed-evals/flavrub-eval.csv")
 write.csv(flavrub.diffdf, file = "completed-evals/flavrub-diff.csv")
-#write.csv(flavrub.varimpdf, file = "completed-evals/flavrub-varimport.csv")
+write.csv(flavrub.varimpdf, file = "completed-evals/flavrub-varimport.csv")
+saveRDS(flavrub.overlaplist, file = "flavrub-overlaps.RData")
+saveRDS(flavrub.idmlist, file = "flavrub-idms.RData")
 ```
 
+```{r flavrub ensemble}
+flavrub.overlap.ensemble <- raster(mean(rast(flavrub.overlaplist[c(1:100)])))
+flavrub.overlap.spdf <- as(flavrub.overlap.ensemble, "SpatialPixelsDataFrame")
+flavrub.overlap.df <- as.data.frame(flavrub.overlap.spdf)
 
+flavrub.overlap.plot <- ggplot() +
+  geom_tile(data = flavrub.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavrub-overlap.png", flavrub.overlap.plot, width = 6, height = 4, units = "in")
+
+flavrub.idm.ensemble <- raster(mean(rast(flavrub.idmlist[c(1:100)])))
+flavrub.idm.spdf <- as(flavrub.idm.ensemble, "SpatialPixelsDataFrame")
+flavrub.idm.df <- as.data.frame(flavrub.idm.spdf)
+
+flavrub.idm.plot <- ggplot() +
+  geom_tile(data = flavrub.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/flavrub-idm.png", flavrub.idm.plot, width = 6, height = 4, units = "in")
+```
 
 # Mixtus
 ## Chamaenerion
@@ -1565,10 +2049,10 @@ mixcham <- bbna %>%
 ```
 
 ```{r mixcham maxent for loop, message = F}
+mixcham.overlaplist <- vector(mode = "list", length = 100)
+mixcham.idmlist <- vector(mode = "list", length = 100)
+
 mixcham.evaldf <- data.frame()
-
-mixcham.diffdf <- data.frame()
-
 mixcham.varimpdf <- data.frame()
 
 set.seed(51445)
@@ -1626,6 +2110,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   mixcham.overlap <- as(mix.predict * cham.predict, "SpatRaster")
+  mixcham.overlaplist[[i]] = mixcham.overlap
   
   
   
@@ -1635,39 +2120,86 @@ for(i in 1:100){
                           a = bg.train)
   
   mixcham.idm <- as(dismo::predict(mixcham.maxent, stack(bioclim)), "SpatRaster")
+  mixcham.idmlist[[i]] = mixcham.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (mixcham.overlap - mixcham.idm)[])
-
-  mixcham.diffdf <- bind_rows(mixcham.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   mixcham.overlap.auc <- AUC(obs = mixcham.test, pred = mixcham.overlap)
   mixcham.idm.auc <- AUC(obs = mixcham.test, pred = mixcham.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  mixcham.overlap.tssdf <- mixcham.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixcham.overlap.tstar <- which.max(mixcham.overlap.tssdf$TSS)
+  mixcham.idm.tssdf <- mixcham.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixcham.idm.tstar <- which.max(mixcham.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   mixcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = mixcham.overlap.auc$AUC,
-                        TSS = max(mixcham.overlap.auc$thresholds$sensitivity + mixcham.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(mixcham.overlap.tssdf$TSS),
+                        tstar = mixcham.overlap.tssdf[mixcham.overlap.tstar, 1],
+                        sens_star = mixcham.overlap.tssdf[mixcham.overlap.tstar, 4],
+                        spec_star = mixcham.overlap.tssdf[mixcham.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(mixcham.idm)), na.omit(values(mixcham.overlap)), na.rm = T))
 
   mixcham.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = mixcham.idm.auc$AUC,
-                        TSS = max(mixcham.idm.auc$thresholds$sensitivity + mixcham.idm.auc$thresholds$specificity - 1))
+                        TSS = max(mixcham.idm.tssdf$TSS),
+                        tstar = mixcham.idm.tssdf[mixcham.idm.tstar, 1],
+                        sens_star = mixcham.idm.tssdf[mixcham.idm.tstar, 4],
+                        spec_star = mixcham.idm.tssdf[mixcham.idm.tstar, 5])
   
   mixcham.evaldf = bind_rows(mixcham.evaldf, mixcham.overlap.eval, mixcham.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(mixcham.maxent@results[7:26,]),
+                        percent = mixcham.maxent@results[7:26],
+                        permutation = mixcham.maxent@results[27:46])
+  
+  mixcham.varimpdf = bind_rows(mixcham.varimpdf, idm.vars)
 }
 
 write.csv(mixcham.evaldf, file = "completed-evals/mixcham-eval.csv")
 write.csv(mixcham.diffdf, file = "completed-evals/mixcham-diff.csv")
-# write.csv(mixcham.varimpdf, file = "completed-evals/mixcham-varimport.csv")
+write.csv(mixcham.varimpdf, file = "completed-evals/mixcham-varimport.csv")
+saveRDS(mixcham.overlaplist, file = "mixcham-overlaps.RData")
+saveRDS(mixcham.idmlist, file = "mixcham-idms.RData")
+```
+
+```{r mixcham ensemble}
+mixcham.overlap.ensemble <- raster(mean(rast(mixcham.overlaplist[c(1:100)])))
+mixcham.overlap.spdf <- as(mixcham.overlap.ensemble, "SpatialPixelsDataFrame")
+mixcham.overlap.df <- as.data.frame(mixcham.overlap.spdf)
+
+mixcham.overlap.plot <- ggplot() +
+  geom_tile(data = mixcham.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixcham-overlap.png", mixcham.overlap.plot, width = 6, height = 4, units = "in")
+
+mixcham.idm.ensemble <- raster(mean(rast(mixcham.idmlist[c(1:100)])))
+mixcham.idm.spdf <- as(mixcham.idm.ensemble, "SpatialPixelsDataFrame")
+mixcham.idm.df <- as.data.frame(mixcham.idm.spdf)
+
+mixcham.idm.plot <- ggplot() +
+  geom_tile(data = mixcham.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixcham-idm.png", mixcham.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Cirsium
@@ -1683,10 +2215,10 @@ mixcir <- bbna %>%
 ```
 
 ```{r mixcir maxent for loop, message = F}
+mixcir.overlaplist <- vector(mode = "list", length = 100)
+mixcir.idmlist <- vector(mode = "list", length = 100)
+
 mixcir.evaldf <- data.frame()
-
-mixcir.diffdf <- data.frame()
-
 mixcir.varimpdf <- data.frame()
 
 set.seed(290424)
@@ -1744,6 +2276,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   mixcir.overlap <- as(mix.predict * cir.predict, "SpatRaster")
+  mixcir.overlaplist[[i]] = mixcir.overlap
   
   
   
@@ -1753,41 +2286,87 @@ for(i in 1:100){
                           a = bg.train)
   
   mixcir.idm <- as(dismo::predict(mixcir.maxent, stack(bioclim)), "SpatRaster")
+  mixcir.idmlist[[i]] = mixcir.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (mixcir.overlap - mixcir.idm)[])
-
-  mixcir.diffdf <- bind_rows(mixcir.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   mixcir.overlap.auc <- AUC(obs = mixcir.test, pred = mixcir.overlap)
   mixcir.idm.auc <- AUC(obs = mixcir.test, pred = mixcir.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  mixcir.overlap.tssdf <- mixcir.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixcir.overlap.tstar <- which.max(mixcir.overlap.tssdf$TSS)
+  mixcir.idm.tssdf <- mixcir.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixcir.idm.tstar <- which.max(mixcir.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   mixcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = mixcir.overlap.auc$AUC,
-                        TSS = max(mixcir.overlap.auc$thresholds$sensitivity + mixcir.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(mixcir.overlap.tssdf$TSS),
+                        tstar = mixcir.overlap.tssdf[mixcir.overlap.tstar, 1],
+                        sens_star = mixcir.overlap.tssdf[mixcir.overlap.tstar, 4],
+                        spec_star = mixcir.overlap.tssdf[mixcir.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(mixcir.idm)), na.omit(values(mixcir.overlap)), na.rm = T))
 
   mixcir.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = mixcir.idm.auc$AUC,
-                        TSS = max(mixcir.idm.auc$thresholds$sensitivity + mixcir.idm.auc$thresholds$specificity - 1))
+                        TSS = max(mixcir.idm.tssdf$TSS),
+                        tstar = mixcir.idm.tssdf[mixcir.idm.tstar, 1],
+                        sens_star = mixcir.idm.tssdf[mixcir.idm.tstar, 4],
+                        spec_star = mixcir.idm.tssdf[mixcir.idm.tstar, 5])
   
   mixcir.evaldf = bind_rows(mixcir.evaldf, mixcir.overlap.eval, mixcir.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(mixcir.maxent@results[7:26,]),
+                        percent = mixcir.maxent@results[7:26],
+                        permutation = mixcir.maxent@results[27:46])
+  
+  mixcir.varimpdf = bind_rows(mixcir.varimpdf, idm.vars)
 }
 
 write.csv(mixcir.evaldf, file = "completed-evals/mixcir-eval.csv")
 write.csv(mixcir.diffdf, file = "completed-evals/mixcir-diff.csv")
-# write.csv(mixcir.varimpdf, file = "completed-evals/mixcir-varimport.csv")
+write.csv(mixcir.varimpdf, file = "completed-evals/mixcir-varimport.csv")
+saveRDS(mixcir.overlaplist, file = "mixcir-overlaps.RData")
+saveRDS(mixcir.idmlist, file = "mixcir-idms.RData")
 ```
 
+```{r mixcir ensemble}
+mixcir.overlap.ensemble <- raster(mean(rast(mixcir.overlaplist[c(1:100)])))
+mixcir.overlap.spdf <- as(mixcir.overlap.ensemble, "SpatialPixelsDataFrame")
+mixcir.overlap.df <- as.data.frame(mixcir.overlap.spdf)
+
+mixcir.overlap.plot <- ggplot() +
+  geom_tile(data = mixcir.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixcir-overlap.png", mixcir.overlap.plot, width = 6, height = 4, units = "in")
+
+mixcir.idm.ensemble <- raster(mean(rast(mixcir.idmlist[c(1:100)])))
+mixcir.idm.spdf <- as(mixcir.idm.ensemble, "SpatialPixelsDataFrame")
+mixcir.idm.df <- as.data.frame(mixcir.idm.spdf)
+
+mixcir.idm.plot <- ggplot() +
+  geom_tile(data = mixcir.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixcir-idm.png", mixcir.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Lupinus
 
@@ -1802,10 +2381,10 @@ mixlup <- bbna %>%
 ```
 
 ```{r mixlup maxent for loop, message = F}
+mixlup.overlaplist <- vector(mode = "list", length = 100)
+mixlup.idmlist <- vector(mode = "list", length = 100)
+
 mixlup.evaldf <- data.frame()
-
-mixlup.diffdf <- data.frame()
-
 mixlup.varimpdf <- data.frame()
 
 set.seed(232024)
@@ -1863,6 +2442,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   mixlup.overlap <- as(mix.predict * lup.predict, "SpatRaster")
+  mixlup.overlaplist[[i]] = mixlup.overlap
   
   
   
@@ -1872,39 +2452,86 @@ for(i in 1:100){
                           a = bg.train)
   
   mixlup.idm <- as(dismo::predict(mixlup.maxent, stack(bioclim)), "SpatRaster")
+  mixlup.idmlist[[i]] = mixlup.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (mixlup.overlap - mixlup.idm)[])
-
-  mixlup.diffdf <- bind_rows(mixlup.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   mixlup.overlap.auc <- AUC(obs = mixlup.test, pred = mixlup.overlap)
   mixlup.idm.auc <- AUC(obs = mixlup.test, pred = mixlup.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  mixlup.overlap.tssdf <- mixlup.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixlup.overlap.tstar <- which.max(mixlup.overlap.tssdf$TSS)
+  mixlup.idm.tssdf <- mixlup.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixlup.idm.tstar <- which.max(mixlup.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   mixlup.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = mixlup.overlap.auc$AUC,
-                        TSS = max(mixlup.overlap.auc$thresholds$sensitivity + mixlup.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(mixlup.overlap.tssdf$TSS),
+                        tstar = mixlup.overlap.tssdf[mixlup.overlap.tstar, 1],
+                        sens_star = mixlup.overlap.tssdf[mixlup.overlap.tstar, 4],
+                        spec_star = mixlup.overlap.tssdf[mixlup.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(mixlup.idm)), na.omit(values(mixlup.overlap)), na.rm = T))
 
   mixlup.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = mixlup.idm.auc$AUC,
-                        TSS = max(mixlup.idm.auc$thresholds$sensitivity + mixlup.idm.auc$thresholds$specificity - 1))
+                        TSS = max(mixlup.idm.tssdf$TSS),
+                        tstar = mixlup.idm.tssdf[mixlup.idm.tstar, 1],
+                        sens_star = mixlup.idm.tssdf[mixlup.idm.tstar, 4],
+                        spec_star = mixlup.idm.tssdf[mixlup.idm.tstar, 5])
   
   mixlup.evaldf = bind_rows(mixlup.evaldf, mixlup.overlap.eval, mixlup.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(mixlup.maxent@results[7:26,]),
+                        percent = mixlup.maxent@results[7:26],
+                        permutation = mixlup.maxent@results[27:46])
+  
+  mixlup.varimpdf = bind_rows(mixlup.varimpdf, idm.vars)
 }
 
 write.csv(mixlup.evaldf, file = "completed-evals/mixlup-eval.csv")
 write.csv(mixlup.diffdf, file = "completed-evals/mixlup-diff.csv")
-# write.csv(mixlup.varimpdf, file = "completed-evals/mixlup-varimport.csv")
+write.csv(mixlup.varimpdf, file = "completed-evals/mixlup-varimport.csv")
+saveRDS(mixlup.overlaplist, file = "mixlup-overlaps.RData")
+saveRDS(mixlup.idmlist, file = "mixlup-idms.RData")
+```
+
+```{r mixlup ensemble}
+mixlup.overlap.ensemble <- raster(mean(rast(mixlup.overlaplist[c(1:100)])))
+mixlup.overlap.spdf <- as(mixlup.overlap.ensemble, "SpatialPixelsDataFrame")
+mixlup.overlap.df <- as.data.frame(mixlup.overlap.spdf)
+
+mixlup.overlap.plot <- ggplot() +
+  geom_tile(data = mixlup.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixlup-overlap.png", mixlup.overlap.plot, width = 6, height = 4, units = "in")
+
+mixlup.idm.ensemble <- raster(mean(rast(mixlup.idmlist[c(1:100)])))
+mixlup.idm.spdf <- as(mixlup.idm.ensemble, "SpatialPixelsDataFrame")
+mixlup.idm.df <- as.data.frame(mixlup.idm.spdf)
+
+mixlup.idm.plot <- ggplot() +
+  geom_tile(data = mixlup.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixlup-idm.png", mixlup.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Penstemon
@@ -1920,10 +2547,10 @@ mixpen <- bbna %>%
 ```
 
 ```{r mixpen maxent for loop, message = F}
+mixpen.overlaplist <- vector(mode = "list", length = 100)
+mixpen.idmlist <- vector(mode = "list", length = 100)
+
 mixpen.evaldf <- data.frame()
-
-mixpen.diffdf <- data.frame()
-
 mixpen.varimpdf <- data.frame()
 
 set.seed(208483)
@@ -1981,6 +2608,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   mixpen.overlap <- as(mix.predict * pen.predict, "SpatRaster")
+  mixpen.overlaplist[[i]] = mixpen.overlap
   
   
   
@@ -1990,41 +2618,87 @@ for(i in 1:100){
                           a = bg.train)
   
   mixpen.idm <- as(dismo::predict(mixpen.maxent, stack(bioclim)), "SpatRaster")
+  mixpen.idmlist[[i]] = mixpen.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (mixpen.overlap - mixpen.idm)[])
-
-  mixpen.diffdf <- bind_rows(mixpen.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   mixpen.overlap.auc <- AUC(obs = mixpen.test, pred = mixpen.overlap)
   mixpen.idm.auc <- AUC(obs = mixpen.test, pred = mixpen.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  mixpen.overlap.tssdf <- mixpen.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixpen.overlap.tstar <- which.max(mixpen.overlap.tssdf$TSS)
+  mixpen.idm.tssdf <- mixpen.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixpen.idm.tstar <- which.max(mixpen.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   mixpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = mixpen.overlap.auc$AUC,
-                        TSS = max(mixpen.overlap.auc$thresholds$sensitivity + mixpen.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(mixpen.overlap.tssdf$TSS),
+                        tstar = mixpen.overlap.tssdf[mixpen.overlap.tstar, 1],
+                        sens_star = mixpen.overlap.tssdf[mixpen.overlap.tstar, 4],
+                        spec_star = mixpen.overlap.tssdf[mixpen.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(mixpen.idm)), na.omit(values(mixpen.overlap)), na.rm = T))
 
   mixpen.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = mixpen.idm.auc$AUC,
-                        TSS = max(mixpen.idm.auc$thresholds$sensitivity + mixpen.idm.auc$thresholds$specificity - 1))
+                        TSS = max(mixpen.idm.tssdf$TSS),
+                        tstar = mixpen.idm.tssdf[mixpen.idm.tstar, 1],
+                        sens_star = mixpen.idm.tssdf[mixpen.idm.tstar, 4],
+                        spec_star = mixpen.idm.tssdf[mixpen.idm.tstar, 5])
   
   mixpen.evaldf = bind_rows(mixpen.evaldf, mixpen.overlap.eval, mixpen.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(mixpen.maxent@results[7:26,]),
+                        percent = mixpen.maxent@results[7:26],
+                        permutation = mixpen.maxent@results[27:46])
+  
+  mixpen.varimpdf = bind_rows(mixpen.varimpdf, idm.vars)
 }
 
 write.csv(mixpen.evaldf, file = "completed-evals/mixpen-eval.csv")
 write.csv(mixpen.diffdf, file = "completed-evals/mixpen-diff.csv")
-# write.csv(mixpen.varimpdf, file = "completed-evals/mixpen-varimport.csv")
+write.csv(mixpen.varimpdf, file = "completed-evals/mixpen-varimport.csv")
+saveRDS(mixpen.overlaplist, file = "mixpen-overlaps.RData")
+saveRDS(mixpen.idmlist, file = "mixpen-idms.RData")
 ```
 
+```{r mixpen ensemble}
+mixpen.overlap.ensemble <- raster(mean(rast(mixpen.overlaplist[c(1:100)])))
+mixpen.overlap.spdf <- as(mixpen.overlap.ensemble, "SpatialPixelsDataFrame")
+mixpen.overlap.df <- as.data.frame(mixpen.overlap.spdf)
+
+mixpen.overlap.plot <- ggplot() +
+  geom_tile(data = mixpen.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixpen-overlap.png", mixpen.overlap.plot, width = 6, height = 4, units = "in")
+
+mixpen.idm.ensemble <- raster(mean(rast(mixpen.idmlist[c(1:100)])))
+mixpen.idm.spdf <- as(mixpen.idm.ensemble, "SpatialPixelsDataFrame")
+mixpen.idm.df <- as.data.frame(mixpen.idm.spdf)
+
+mixpen.idm.plot <- ggplot() +
+  geom_tile(data = mixpen.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixpen-idm.png", mixpen.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Rubus
 
@@ -2039,10 +2713,10 @@ mixrub <- bbna %>%
 ```
 
 ```{r mixrub maxent for loop, message = F}
+mixrub.overlaplist <- vector(mode = "list", length = 100)
+mixrub.idmlist <- vector(mode = "list", length = 100)
+
 mixrub.evaldf <- data.frame()
-
-mixrub.diffdf <- data.frame()
-
 mixrub.varimpdf <- data.frame()
 
 set.seed(121023)
@@ -2100,6 +2774,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   mixrub.overlap <- as(mix.predict * rub.predict, "SpatRaster")
+  mixrub.overlaplist[[i]] = mixrub.overlap
   
   
   
@@ -2109,39 +2784,86 @@ for(i in 1:100){
                           a = bg.train)
   
   mixrub.idm <- as(dismo::predict(mixrub.maxent, stack(bioclim)), "SpatRaster")
+  mixrub.idmlist[[i]] = mixrub.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (mixrub.overlap - mixrub.idm)[])
-
-  mixrub.diffdf <- bind_rows(mixrub.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   mixrub.overlap.auc <- AUC(obs = mixrub.test, pred = mixrub.overlap)
   mixrub.idm.auc <- AUC(obs = mixrub.test, pred = mixrub.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  mixrub.overlap.tssdf <- mixrub.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixrub.overlap.tstar <- which.max(mixrub.overlap.tssdf$TSS)
+  mixrub.idm.tssdf <- mixrub.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  mixrub.idm.tstar <- which.max(mixrub.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   mixrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = mixrub.overlap.auc$AUC,
-                        TSS = max(mixrub.overlap.auc$thresholds$sensitivity + mixrub.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(mixrub.overlap.tssdf$TSS),
+                        tstar = mixrub.overlap.tssdf[mixrub.overlap.tstar, 1],
+                        sens_star = mixrub.overlap.tssdf[mixrub.overlap.tstar, 4],
+                        spec_star = mixrub.overlap.tssdf[mixrub.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(mixrub.idm)), na.omit(values(mixrub.overlap)), na.rm = T))
 
   mixrub.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = mixrub.idm.auc$AUC,
-                        TSS = max(mixrub.idm.auc$thresholds$sensitivity + mixrub.idm.auc$thresholds$specificity - 1))
+                        TSS = max(mixrub.idm.tssdf$TSS),
+                        tstar = mixrub.idm.tssdf[mixrub.idm.tstar, 1],
+                        sens_star = mixrub.idm.tssdf[mixrub.idm.tstar, 4],
+                        spec_star = mixrub.idm.tssdf[mixrub.idm.tstar, 5])
   
   mixrub.evaldf = bind_rows(mixrub.evaldf, mixrub.overlap.eval, mixrub.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(mixrub.maxent@results[7:26,]),
+                        percent = mixrub.maxent@results[7:26],
+                        permutation = mixrub.maxent@results[27:46])
+  
+  mixrub.varimpdf = bind_rows(mixrub.varimpdf, idm.vars)
 }
 
 write.csv(mixrub.evaldf, file = "completed-evals/mixrub-eval.csv")
 write.csv(mixrub.diffdf, file = "completed-evals/mixrub-diff.csv")
-#write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
+write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
+saveRDS(mixrub.overlaplist, file = "mixrub-overlaps.RData")
+saveRDS(mixrub.idmlist, file = "mixrub-idms.RData")
+```
+
+```{r mixrub ensemble}
+mixrub.overlap.ensemble <- raster(mean(rast(mixrub.overlaplist[c(1:100)])))
+mixrub.overlap.spdf <- as(mixrub.overlap.ensemble, "SpatialPixelsDataFrame")
+mixrub.overlap.df <- as.data.frame(mixrub.overlap.spdf)
+
+mixrub.overlap.plot <- ggplot() +
+  geom_tile(data = mixrub.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixrub-overlap.png", mixrub.overlap.plot, width = 6, height = 4, units = "in")
+
+mixrub.idm.ensemble <- raster(mean(rast(mixrub.idmlist[c(1:100)])))
+mixrub.idm.spdf <- as(mixrub.idm.ensemble, "SpatialPixelsDataFrame")
+mixrub.idm.df <- as.data.frame(mixrub.idm.spdf)
+
+mixrub.idm.plot <- ggplot() +
+  geom_tile(data = mixrub.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/mixrub-idm.png", mixrub.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 <!-- ### Rubus spectabilis -->
@@ -2417,10 +3139,10 @@ voscham <- bbna %>%
 ```
 
 ```{r voscham maxent for loop, message = F}
+voscham.overlaplist <- vector(mode = "list", length = 100)
+voscham.idmlist <- vector(mode = "list", length = 100)
+
 voscham.evaldf <- data.frame()
-
-voscham.diffdf <- data.frame()
-
 voscham.varimpdf <- data.frame()
 
 set.seed(1301143)
@@ -2478,6 +3200,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   voscham.overlap <- as(vos.predict * cham.predict, "SpatRaster")
+  voscham.overlaplist[[i]] = voscham.overlap
   
   
   
@@ -2487,42 +3210,87 @@ for(i in 1:100){
                           a = bg.train)
   
   voscham.idm <- as(dismo::predict(voscham.maxent, stack(bioclim)), "SpatRaster")
+  voscham.idmlist[[i]] = voscham.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (voscham.overlap - voscham.idm)[])
-
-  voscham.diffdf <- bind_rows(voscham.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   voscham.overlap.auc <- AUC(obs = voscham.test, pred = voscham.overlap)
   voscham.idm.auc <- AUC(obs = voscham.test, pred = voscham.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  voscham.overlap.tssdf <- voscham.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voscham.overlap.tstar <- which.max(voscham.overlap.tssdf$TSS)
+  voscham.idm.tssdf <- voscham.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voscham.idm.tstar <- which.max(voscham.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   voscham.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = voscham.overlap.auc$AUC,
-                        TSS = max(voscham.overlap.auc$thresholds$sensitivity + voscham.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(voscham.overlap.tssdf$TSS),
+                        tstar = voscham.overlap.tssdf[voscham.overlap.tstar, 1],
+                        sens_star = voscham.overlap.tssdf[voscham.overlap.tstar, 4],
+                        spec_star = voscham.overlap.tssdf[voscham.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(voscham.idm)), na.omit(values(voscham.overlap)), na.rm = T))
 
   voscham.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = voscham.idm.auc$AUC,
-                        TSS = max(voscham.idm.auc$thresholds$sensitivity + voscham.idm.auc$thresholds$specificity - 1))
+                        TSS = max(voscham.idm.tssdf$TSS),
+                        tstar = voscham.idm.tssdf[voscham.idm.tstar, 1],
+                        sens_star = voscham.idm.tssdf[voscham.idm.tstar, 4],
+                        spec_star = voscham.idm.tssdf[voscham.idm.tstar, 5])
   
   voscham.evaldf = bind_rows(voscham.evaldf, voscham.overlap.eval, voscham.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(voscham.maxent@results[7:26,]),
+                        percent = voscham.maxent@results[7:26],
+                        permutation = voscham.maxent@results[27:46])
+  
+  voscham.varimpdf = bind_rows(voscham.varimpdf, idm.vars)
 }
 
 write.csv(voscham.evaldf, file = "completed-evals/voscham-eval.csv")
 write.csv(voscham.diffdf, file = "completed-evals/voscham-diff.csv")
-#write.csv(voscham.varimpdf, file = "completed-evals/voscham-varimport.csv")
+write.csv(voscham.varimpdf, file = "completed-evals/voscham-varimport.csv")
+saveRDS(voscham.overlaplist, file = "voscham-overlaps.RData")
+saveRDS(voscham.idmlist, file = "voscham-idms.RData")
 ```
 
+```{r voscham ensemble}
+voscham.overlap.ensemble <- raster(mean(rast(voscham.overlaplist[c(1:100)])))
+voscham.overlap.spdf <- as(voscham.overlap.ensemble, "SpatialPixelsDataFrame")
+voscham.overlap.df <- as.data.frame(voscham.overlap.spdf)
 
+voscham.overlap.plot <- ggplot() +
+  geom_tile(data = voscham.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voscham-overlap.png", voscham.overlap.plot, width = 6, height = 4, units = "in")
+
+voscham.idm.ensemble <- raster(mean(rast(voscham.idmlist[c(1:100)])))
+voscham.idm.spdf <- as(voscham.idm.ensemble, "SpatialPixelsDataFrame")
+voscham.idm.df <- as.data.frame(voscham.idm.spdf)
+
+voscham.idm.plot <- ggplot() +
+  geom_tile(data = voscham.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voscham-idm.png", voscham.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Cirsium
 
@@ -2537,10 +3305,10 @@ voscir <- bbna %>%
 ```
 
 ```{r voscir maxent for loop, message = F}
+voscir.overlaplist <- vector(mode = "list", length = 100)
+voscir.idmlist <- vector(mode = "list", length = 100)
+
 voscir.evaldf <- data.frame()
-
-voscir.diffdf <- data.frame()
-
 voscir.varimpdf <- data.frame()
 
 set.seed(261402)
@@ -2598,6 +3366,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   voscir.overlap <- as(vos.predict * cir.predict, "SpatRaster")
+  voscir.overlaplist[[i]] = voscir.overlap
   
   
   
@@ -2607,39 +3376,86 @@ for(i in 1:100){
                           a = bg.train)
   
   voscir.idm <- as(dismo::predict(voscir.maxent, stack(bioclim)), "SpatRaster")
+  voscir.idmlist[[i]] = voscir.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (voscir.overlap - voscir.idm)[])
-
-  voscir.diffdf <- bind_rows(voscir.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   voscir.overlap.auc <- AUC(obs = voscir.test, pred = voscir.overlap)
   voscir.idm.auc <- AUC(obs = voscir.test, pred = voscir.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  voscir.overlap.tssdf <- voscir.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voscir.overlap.tstar <- which.max(voscir.overlap.tssdf$TSS)
+  voscir.idm.tssdf <- voscir.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voscir.idm.tstar <- which.max(voscir.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   voscir.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = voscir.overlap.auc$AUC,
-                        TSS = max(voscir.overlap.auc$thresholds$sensitivity + voscir.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(voscir.overlap.tssdf$TSS),
+                        tstar = voscir.overlap.tssdf[voscir.overlap.tstar, 1],
+                        sens_star = voscir.overlap.tssdf[voscir.overlap.tstar, 4],
+                        spec_star = voscir.overlap.tssdf[voscir.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(voscir.idm)), na.omit(values(voscir.overlap)), na.rm = T))
 
   voscir.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = voscir.idm.auc$AUC,
-                        TSS = max(voscir.idm.auc$thresholds$sensitivity + voscir.idm.auc$thresholds$specificity - 1))
+                        TSS = max(voscir.idm.tssdf$TSS),
+                        tstar = voscir.idm.tssdf[voscir.idm.tstar, 1],
+                        sens_star = voscir.idm.tssdf[voscir.idm.tstar, 4],
+                        spec_star = voscir.idm.tssdf[voscir.idm.tstar, 5])
   
   voscir.evaldf = bind_rows(voscir.evaldf, voscir.overlap.eval, voscir.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(voscir.maxent@results[7:26,]),
+                        percent = voscir.maxent@results[7:26],
+                        permutation = voscir.maxent@results[27:46])
+  
+  voscir.varimpdf = bind_rows(voscir.varimpdf, idm.vars)
 }
 
 write.csv(voscir.evaldf, file = "completed-evals/voscir-eval.csv")
 write.csv(voscir.diffdf, file = "completed-evals/voscir-diff.csv")
-#write.csv(voscir.varimpdf, file = "completed-evals/voscir-varimport.csv")
+write.csv(voscir.varimpdf, file = "completed-evals/voscir-varimport.csv")
+saveRDS(voscir.overlaplist, file = "voscir-overlaps.RData")
+saveRDS(voscir.idmlist, file = "voscir-idms.RData")
+```
+
+```{r voscir ensemble}
+voscir.overlap.ensemble <- raster(mean(rast(voscir.overlaplist[c(1:100)])))
+voscir.overlap.spdf <- as(voscir.overlap.ensemble, "SpatialPixelsDataFrame")
+voscir.overlap.df <- as.data.frame(voscir.overlap.spdf)
+
+voscir.overlap.plot <- ggplot() +
+  geom_tile(data = voscir.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voscir-overlap.png", voscir.overlap.plot, width = 6, height = 4, units = "in")
+
+voscir.idm.ensemble <- raster(mean(rast(voscir.idmlist[c(1:100)])))
+voscir.idm.spdf <- as(voscir.idm.ensemble, "SpatialPixelsDataFrame")
+voscir.idm.df <- as.data.frame(voscir.idm.spdf)
+
+voscir.idm.plot <- ggplot() +
+  geom_tile(data = voscir.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voscir-idm.png", voscir.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 ## Lupinus
@@ -2655,10 +3471,10 @@ voslup <- bbna %>%
 ```
 
 ```{r voslup maxent for loop, message = F}
+voslup.overlaplist <- vector(mode = "list", length = 100)
+voslup.idmlist <- vector(mode = "list", length = 100)
+
 voslup.evaldf <- data.frame()
-
-voslup.diffdf <- data.frame()
-
 voslup.varimpdf <- data.frame()
 
 set.seed(122323)
@@ -2716,6 +3532,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   voslup.overlap <- as(vos.predict * lup.predict, "SpatRaster")
+  voslup.overlaplist[[i]] = voslup.overlap
   
   
   
@@ -2725,39 +3542,86 @@ for(i in 1:100){
                           a = bg.train)
   
   voslup.idm <- as(dismo::predict(voslup.maxent, stack(bioclim)), "SpatRaster")
+  voslup.idmlist[[i]] = voslup.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (voslup.overlap - voslup.idm)[])
-
-  voslup.diffdf <- bind_rows(voslup.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   voslup.overlap.auc <- AUC(obs = voslup.test, pred = voslup.overlap)
   voslup.idm.auc <- AUC(obs = voslup.test, pred = voslup.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  voslup.overlap.tssdf <- voslup.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voslup.overlap.tstar <- which.max(voslup.overlap.tssdf$TSS)
+  voslup.idm.tssdf <- voslup.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  voslup.idm.tstar <- which.max(voslup.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   voslup.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = voslup.overlap.auc$AUC,
-                        TSS = max(voslup.overlap.auc$thresholds$sensitivity + voslup.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(voslup.overlap.tssdf$TSS),
+                        tstar = voslup.overlap.tssdf[voslup.overlap.tstar, 1],
+                        sens_star = voslup.overlap.tssdf[voslup.overlap.tstar, 4],
+                        spec_star = voslup.overlap.tssdf[voslup.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(voslup.idm)), na.omit(values(voslup.overlap)), na.rm = T))
 
   voslup.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = voslup.idm.auc$AUC,
-                        TSS = max(voslup.idm.auc$thresholds$sensitivity + voslup.idm.auc$thresholds$specificity - 1))
+                        TSS = max(voslup.idm.tssdf$TSS),
+                        tstar = voslup.idm.tssdf[voslup.idm.tstar, 1],
+                        sens_star = voslup.idm.tssdf[voslup.idm.tstar, 4],
+                        spec_star = voslup.idm.tssdf[voslup.idm.tstar, 5])
   
   voslup.evaldf = bind_rows(voslup.evaldf, voslup.overlap.eval, voslup.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(voslup.maxent@results[7:26,]),
+                        percent = voslup.maxent@results[7:26],
+                        permutation = voslup.maxent@results[27:46])
+  
+  voslup.varimpdf = bind_rows(voslup.varimpdf, idm.vars)
 }
 
 write.csv(voslup.evaldf, file = "completed-evals/voslup-eval.csv")
 write.csv(voslup.diffdf, file = "completed-evals/voslup-diff.csv")
-# write.csv(voslup.varimpdf, file = "completed-evals/voslup-varimport.csv")
+write.csv(voslup.varimpdf, file = "completed-evals/voslup-varimport.csv")
+saveRDS(voslup.overlaplist, file = "voslup-overlaps.RData")
+saveRDS(voslup.idmlist, file = "voslup-idms.RData")
+```
+
+```{r voslup ensemble}
+voslup.overlap.ensemble <- raster(mean(rast(voslup.overlaplist[c(1:100)])))
+voslup.overlap.spdf <- as(voslup.overlap.ensemble, "SpatialPixelsDataFrame")
+voslup.overlap.df <- as.data.frame(voslup.overlap.spdf)
+
+voslup.overlap.plot <- ggplot() +
+  geom_tile(data = voslup.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voslup-overlap.png", voslup.overlap.plot, width = 6, height = 4, units = "in")
+
+voslup.idm.ensemble <- raster(mean(rast(voslup.idmlist[c(1:100)])))
+voslup.idm.spdf <- as(voslup.idm.ensemble, "SpatialPixelsDataFrame")
+voslup.idm.df <- as.data.frame(voslup.idm.spdf)
+
+voslup.idm.plot <- ggplot() +
+  geom_tile(data = voslup.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/voslup-idm.png", voslup.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 <!-- ### L. polyphyllus -->
@@ -3014,10 +3878,10 @@ vospen <- bbna %>%
 ```
 
 ```{r vospen maxent for loop, message = F}
+vospen.overlaplist <- vector(mode = "list", length = 100)
+vospen.idmlist <- vector(mode = "list", length = 100)
+
 vospen.evaldf <- data.frame()
-
-vospen.diffdf <- data.frame()
-
 vospen.varimpdf <- data.frame()
 
 set.seed(65784)
@@ -3075,6 +3939,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   vospen.overlap <- as(vos.predict * pen.predict, "SpatRaster")
+  vospen.overlaplist[[i]] = vospen.overlap
   
   
   
@@ -3084,41 +3949,87 @@ for(i in 1:100){
                           a = bg.train)
   
   vospen.idm <- as(dismo::predict(vospen.maxent, stack(bioclim)), "SpatRaster")
+  vospen.idmlist[[i]] = vospen.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (vospen.overlap - vospen.idm)[])
-
-  vospen.diffdf <- bind_rows(vospen.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   vospen.overlap.auc <- AUC(obs = vospen.test, pred = vospen.overlap)
   vospen.idm.auc <- AUC(obs = vospen.test, pred = vospen.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  vospen.overlap.tssdf <- vospen.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  vospen.overlap.tstar <- which.max(vospen.overlap.tssdf$TSS)
+  vospen.idm.tssdf <- vospen.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  vospen.idm.tstar <- which.max(vospen.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   vospen.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = vospen.overlap.auc$AUC,
-                        TSS = max(vospen.overlap.auc$thresholds$sensitivity + vospen.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(vospen.overlap.tssdf$TSS),
+                        tstar = vospen.overlap.tssdf[vospen.overlap.tstar, 1],
+                        sens_star = vospen.overlap.tssdf[vospen.overlap.tstar, 4],
+                        spec_star = vospen.overlap.tssdf[vospen.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(vospen.idm)), na.omit(values(vospen.overlap)), na.rm = T))
 
   vospen.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = vospen.idm.auc$AUC,
-                        TSS = max(vospen.idm.auc$thresholds$sensitivity + vospen.idm.auc$thresholds$specificity - 1))
+                        TSS = max(vospen.idm.tssdf$TSS),
+                        tstar = vospen.idm.tssdf[vospen.idm.tstar, 1],
+                        sens_star = vospen.idm.tssdf[vospen.idm.tstar, 4],
+                        spec_star = vospen.idm.tssdf[vospen.idm.tstar, 5])
   
   vospen.evaldf = bind_rows(vospen.evaldf, vospen.overlap.eval, vospen.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(vospen.maxent@results[7:26,]),
+                        percent = vospen.maxent@results[7:26],
+                        permutation = vospen.maxent@results[27:46])
+  
+  vospen.varimpdf = bind_rows(vospen.varimpdf, idm.vars)
 }
 
 write.csv(vospen.evaldf, file = "completed-evals/vospen-eval.csv")
 write.csv(vospen.diffdf, file = "completed-evals/vospen-diff.csv")
-#write.csv(vospen.varimpdf, file = "completed-evals/vospen-varimport.csv")
+write.csv(vospen.varimpdf, file = "completed-evals/vospen-varimport.csv")
+saveRDS(vospen.overlaplist, file = "vospen-overlaps.RData")
+saveRDS(vospen.idmlist, file = "vospen-idms.RData")
 ```
 
+```{r vospen ensemble}
+vospen.overlap.ensemble <- raster(mean(rast(vospen.overlaplist[c(1:100)])))
+vospen.overlap.spdf <- as(vospen.overlap.ensemble, "SpatialPixelsDataFrame")
+vospen.overlap.df <- as.data.frame(vospen.overlap.spdf)
+
+vospen.overlap.plot <- ggplot() +
+  geom_tile(data = vospen.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/vospen-overlap.png", vospen.overlap.plot, width = 6, height = 4, units = "in")
+
+vospen.idm.ensemble <- raster(mean(rast(vospen.idmlist[c(1:100)])))
+vospen.idm.spdf <- as(vospen.idm.ensemble, "SpatialPixelsDataFrame")
+vospen.idm.df <- as.data.frame(vospen.idm.spdf)
+
+vospen.idm.plot <- ggplot() +
+  geom_tile(data = vospen.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/vospen-idm.png", vospen.idm.plot, width = 6, height = 4, units = "in")
+```
 
 ## Rubus
 
@@ -3133,10 +4044,10 @@ vosrub <- bbna %>%
 ```
 
 ```{r vosrub maxent for loop, message = F}
+vosrub.overlaplist <- vector(mode = "list", length = 100)
+vosrub.idmlist <- vector(mode = "list", length = 100)
+
 vosrub.evaldf <- data.frame()
-
-vosrub.diffdf <- data.frame()
-
 vosrub.varimpdf <- data.frame()
 
 set.seed(11424)
@@ -3194,6 +4105,7 @@ for(i in 1:100){
   
   ## Step 2b: Multiply bee and plant habitat suitability to get a joint probability
   vosrub.overlap <- as(vos.predict * rub.predict, "SpatRaster")
+  vosrub.overlaplist[[i]] = vosrub.overlap
   
   
   
@@ -3203,39 +4115,86 @@ for(i in 1:100){
                           a = bg.train)
   
   vosrub.idm <- as(dismo::predict(vosrub.maxent, stack(bioclim)), "SpatRaster")
+  vosrub.idmlist[[i]] = vosrub.idm
   
   
   
-  # Step 4: Subtract predicted rasters to determine whether overlaps over- or under-predict interaction occurrence compared to IDM
-  ### positive value = overlap over-predicts
-  ### negative value = overlap under-predicts
-  overlap_idm = data.frame(run = i, difference = (vosrub.overlap - vosrub.idm)[])
-
-  vosrub.diffdf <- bind_rows(vosrub.diffdf, overlap_idm)
-  
-  # Step 5: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 5a: Use modEvA::AUC to get AUC
+  # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Use modEvA::AUC to get AUC
   vosrub.overlap.auc <- AUC(obs = vosrub.test, pred = vosrub.overlap)
   vosrub.idm.auc <- AUC(obs = vosrub.test, pred = vosrub.idm)
   
+  ## Step 4b: Calculate TSS and tstar
+  vosrub.overlap.tssdf <- vosrub.overlap.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  vosrub.overlap.tstar <- which.max(vosrub.overlap.tssdf$TSS)
+  vosrub.idm.tssdf <- vosrub.idm.auc$thresholds %>%
+    mutate(TSS = sensitivity + specificity - 1)
+  vosrub.idm.tstar <- which.max(vosrub.idm.tssdf$TSS)
   
-  ## Step 5b: Save Evaluation Scores
+  
+  ## Step 4b: Save evaluation scores
+  ### Note: RMSE is the same for both so it is only noted under the overlap
   vosrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
                         AUC = vosrub.overlap.auc$AUC,
-                        TSS = max(vosrub.overlap.auc$thresholds$sensitivity + vosrub.overlap.auc$thresholds$specificity - 1))
+                        TSS = max(vosrub.overlap.tssdf$TSS),
+                        tstar = vosrub.overlap.tssdf[vosrub.overlap.tstar, 1],
+                        sens_star = vosrub.overlap.tssdf[vosrub.overlap.tstar, 4],
+                        spec_star = vosrub.overlap.tssdf[vosrub.overlap.tstar, 5],
+                        RMSE = predicts::RMSE(na.omit(values(vosrub.idm)), na.omit(values(vosrub.overlap)), na.rm = T))
 
   vosrub.idm.eval = data.frame(run = i,
                         model = "IDM",
                         AUC = vosrub.idm.auc$AUC,
-                        TSS = max(vosrub.idm.auc$thresholds$sensitivity + vosrub.idm.auc$thresholds$specificity - 1))
+                        TSS = max(vosrub.idm.tssdf$TSS),
+                        tstar = vosrub.idm.tssdf[vosrub.idm.tstar, 1],
+                        sens_star = vosrub.idm.tssdf[vosrub.idm.tstar, 4],
+                        spec_star = vosrub.idm.tssdf[vosrub.idm.tstar, 5])
   
   vosrub.evaldf = bind_rows(vosrub.evaldf, vosrub.overlap.eval, vosrub.idm.eval)
+  
+    # Step 5: Save Variable Importance
+  idm.vars = data.frame(run = rep(i, 20),
+                        model = rep("IDM", 20),
+                        variable = names(vosrub.maxent@results[7:26,]),
+                        percent = vosrub.maxent@results[7:26],
+                        permutation = vosrub.maxent@results[27:46])
+  
+  vosrub.varimpdf = bind_rows(vosrub.varimpdf, idm.vars)
 }
 
 write.csv(vosrub.evaldf, file = "completed-evals/vosrub-eval.csv")
 write.csv(vosrub.diffdf, file = "completed-evals/vosrub-diff.csv")
-# write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
+write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
+saveRDS(vosrub.overlaplist, file = "vosrub-overlaps.RData")
+saveRDS(vosrub.idmlist, file = "vosrub-idms.RData")
+```
+
+```{r vosrub ensemble}
+vosrub.overlap.ensemble <- raster(mean(rast(vosrub.overlaplist[c(1:100)])))
+vosrub.overlap.spdf <- as(vosrub.overlap.ensemble, "SpatialPixelsDataFrame")
+vosrub.overlap.df <- as.data.frame(vosrub.overlap.spdf)
+
+vosrub.overlap.plot <- ggplot() +
+  geom_tile(data = vosrub.overlap.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/vosrub-overlap.png", vosrub.overlap.plot, width = 6, height = 4, units = "in")
+
+vosrub.idm.ensemble <- raster(mean(rast(vosrub.idmlist[c(1:100)])))
+vosrub.idm.spdf <- as(vosrub.idm.ensemble, "SpatialPixelsDataFrame")
+vosrub.idm.df <- as.data.frame(vosrub.idm.spdf)
+
+vosrub.idm.plot <- ggplot() +
+  geom_tile(data = vosrub.idm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/vosrub-idm.png", vosrub.idm.plot, width = 6, height = 4, units = "in")
 ```
 
 <!-- ### Rubus spectabilis -->
