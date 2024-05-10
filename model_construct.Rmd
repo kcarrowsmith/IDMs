@@ -86,8 +86,6 @@ Per [Feng et al. (2019)](https://onlinelibrary.wiley.com/doi/pdf/10.1002/ece3.55
 # Bifarius
 ## Chamaenerion
 
-Now that all the code above is working, we will run it with a new pairing -- *B. bifarius* X [*Chamaenerion* sp.](https://doi.org/10.15468/dl.9apf52)
-
 ```{r bif cham data, message = F}
 gbif.cham <- gbif %>%
   filter(genus == "Chamaenerion")
@@ -101,9 +99,12 @@ bifcham <- bbna %>%
 ```{r bifcham maxent for loop, message = F}
 bifcham.overlaplist <- vector(mode = "list", length = 100)
 bifcham.idmlist <- vector(mode = "list", length = 100)
+bifcham.overlapthresh <- vector(mode = "list", length = 100)
+bifcham.idmthresh <- vector(mode = "list", length = 100)
 
+bifcham.thresholddf <- data.frame()
 bifcham.evaldf <- data.frame()
-bifcham.varimpdf <- data.frame()
+# bifcham.varimpdf <- data.frame()
 
 set.seed(121023)
 for(i in 1:100){
@@ -173,7 +174,6 @@ for(i in 1:100){
   bifcham.idmlist[[i]] = bifcham.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Use modEvA::AUC to get AUC
   bifcham.overlap.auc <- AUC(obs = bifcham.test, pred = bifcham.overlap)
@@ -187,8 +187,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   bifcham.idm.tstar <- which.max(bifcham.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  bifcham.idmnorm = (bifcham.idm - minmax(bifcham.idm)[1,])/(minmax(bifcham.idm)[2,] - minmax(bifcham.idm)[1,])
+  bifcham.overlapnorm = (bifcham.overlap - minmax(bifcham.overlap)[1,])/(minmax(bifcham.overlap)[2,] - minmax(bifcham.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   bifcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -197,7 +200,7 @@ for(i in 1:100){
                         tstar = bifcham.overlap.tssdf[bifcham.overlap.tstar, 1],
                         sens_star = bifcham.overlap.tssdf[bifcham.overlap.tstar, 4],
                         spec_star = bifcham.overlap.tssdf[bifcham.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(bifcham.idm)), na.omit(values(bifcham.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(bifcham.idmnorm)), na.omit(values(bifcham.overlapnorm)), na.rm = T))
 
   bifcham.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -209,44 +212,19 @@ for(i in 1:100){
   
   bifcham.evaldf = bind_rows(bifcham.evaldf, bifcham.overlap.eval, bifcham.idm.eval)
   
-  # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(bifcham.maxent@results[7:26,]),
-                        percent = bifcham.maxent@results[7:26],
-                        permutation = bifcham.maxent@results[27:46])
-  
-  bifcham.varimpdf = bind_rows(bifcham.varimpdf, idm.vars)
-}
-
-write.csv(bifcham.diffdf, file = "completed-evals/bifcham-diff.csv")
-write.csv(bifcham.evaldf, file = "completed-evals/bifcham-eval.csv")
-write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
-saveRDS(bifcham.overlaplist, file = "bifcham-overlaps.RData")
-saveRDS(bifcham.idmlist, file = "bifcham-idms.RData")
-
-# Some extra code to figure out threshold stuff. Will integrate into the main for loop later.
-
-bifcham.overlapthresh <- vector(mode = "list", length = 100)
-bifcham.idmthresh <- vector(mode = "list", length = 100)
-bifcham.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = bifcham.overlaplist[[i]]
+  # Step 5: Calculate threshold overlap
   tstar.overlap = (bifcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifcham.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifcham.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = bifcham.idmlist[[i]]
   tstar.idm = (bifcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifcham.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifcham.idmthresh[[i]] = idm.thresh
@@ -263,7 +241,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   bifcham.thresholddf = bind_rows(bifcham.thresholddf, shared.df)
+  
+  # # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(bifcham.maxent@results[7:26,]),
+  #                       percent = bifcham.maxent@results[7:26],
+  #                       permutation = bifcham.maxent@results[27:46])
+  # 
+  # bifcham.varimpdf = bind_rows(bifcham.varimpdf, idm.vars)
 }
+
+write.csv(bifcham.evaldf, file = "completed-evals/bifcham-eval.csv")
+write.csv(bifcham.thresholddf, file = "completed-evals/bifcham-threshold.csv")
+# write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
+save(bifcham.overlaplist, file = "bifcham-overlaps.RData")
+save(bifcham.idmlist, file = "bifcham-idms.RData")
 ```
 
 Here, we will build an ensemble of the 100 runs of the overlap and IDM, so I can look at them next to each other.
@@ -310,9 +303,12 @@ bifcir <- bbna %>%
 ```{r bifcir maxent for loop, message = F}
 bifcir.overlaplist <- vector(mode = "list", length = 100)
 bifcir.idmlist <- vector(mode = "list", length = 100)
+bifcir.overlapthresh <- vector(mode = "list", length = 100)
+bifcir.idmthresh <- vector(mode = "list", length = 100)
 
 bifcir.evaldf <- data.frame()
-bifcir.varimpdf <- data.frame()
+bifcir.thresholddf <- data.frame()
+# bifcir.varimpdf <- data.frame()
 
 set.seed(7840126)
 for(i in 1:100){
@@ -396,8 +392,12 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   bifcir.idm.tstar <- which.max(bifcir.idm.tssdf$TSS)
   
+    ## Step 4c: Normalize rasters for RMSE calculation
+  bifcir.idmnorm = (bifcir.idm - minmax(bifcir.idm)[1,])/(minmax(bifcir.idm)[2,] - minmax(bifcir.idm)[1,])
+  bifcir.overlapnorm = (bifcir.overlap - minmax(bifcir.overlap)[1,])/(minmax(bifcir.overlap)[2,] - minmax(bifcir.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   bifcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -406,7 +406,7 @@ for(i in 1:100){
                         tstar = bifcir.overlap.tssdf[bifcir.overlap.tstar, 1],
                         sens_star = bifcir.overlap.tssdf[bifcir.overlap.tstar, 4],
                         spec_star = bifcir.overlap.tssdf[bifcir.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(bifcir.idm)), na.omit(values(bifcir.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(bifcir.idmnorm)), na.omit(values(bifcir.overlapnorm)), na.rm = T))
 
   bifcir.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -418,45 +418,19 @@ for(i in 1:100){
   
   bifcir.evaldf = bind_rows(bifcir.evaldf, bifcir.overlap.eval, bifcir.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(bifcir.maxent@results[7:26,]),
-                        percent = bifcir.maxent@results[7:26],
-                        permutation = bifcir.maxent@results[27:46])
-  
-  bifcir.varimpdf = bind_rows(bifcir.varimpdf, idm.vars)
-}
-
-write.csv(bifcir.diffdf, file = "completed-evals/bifcir-diff.csv")
-write.csv(bifcir.evaldf, file = "completed-evals/bifcir-eval.csv")
-write.csv(bifcir.varimpdf, file = "completed-evals/bifcir-varimport.csv")
-saveRDS(bifcir.overlaplist, file = "bifcir-overlaps.RData")
-saveRDS(bifcir.idmlist, file = "bifcir-idms.RData")
-
-
-# Some extra code to figure out threshold stuff. Will integrate into the main for loop later.
-
-bifcir.overlapthresh <- vector(mode = "list", length = 100)
-bifcir.idmthresh <- vector(mode = "list", length = 100)
-bifcir.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = bifcir.overlaplist[[i]]
+  # Step 5: Calculate threshold overlap
   tstar.overlap = (bifcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifcir.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifcir.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = bifcir.idmlist[[i]]
   tstar.idm = (bifcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifcir.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifcir.idmthresh[[i]] = idm.thresh
@@ -473,7 +447,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   bifcir.thresholddf = bind_rows(bifcir.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(bifcir.maxent@results[7:26,]),
+  #                       percent = bifcir.maxent@results[7:26],
+  #                       permutation = bifcir.maxent@results[27:46])
+  # 
+  # bifcir.varimpdf = bind_rows(bifcir.varimpdf, idm.vars)
 }
+
+write.csv(bifcir.thresholddf, file = "completed-evals/bifcir-threshold.csv")
+write.csv(bifcir.evaldf, file = "completed-evals/bifcir-eval.csv")
+# write.csv(bifcir.varimpdf, file = "completed-evals/bifcir-varimport.csv")
+save(bifcir.overlaplist, file = "bifcir-overlaps.RData")
+save(bifcir.idmlist, file = "bifcir-idms.RData")
 ```
 
 
@@ -522,9 +511,12 @@ Here we have a for-loop running MaxEnt models 100 times. For each run, we will s
 ```{r biflup maxent for loop, message = F}
 biflup.overlaplist <- vector(mode = "list", length = 100)
 biflup.idmlist <- vector(mode = "list", length = 100)
+biflup.overlapthresh <- vector(mode = "list", length = 100)
+biflup.idmthresh <- vector(mode = "list", length = 100)
 
 biflup.evaldf <- data.frame()
-biflup.varimpdf <- data.frame()
+biflup.thresholddf <- data.frame()
+# biflup.varimpdf <- data.frame()
 
 set.seed(122223)
 
@@ -618,8 +610,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   biflup.idm.tstar <- which.max(biflup.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  biflup.idmnorm = (biflup.idm - minmax(biflup.idm)[1,])/(minmax(biflup.idm)[2,] - minmax(biflup.idm)[1,])
+  biflup.overlapnorm = (biflup.overlap - minmax(biflup.overlap)[1,])/(minmax(biflup.overlap)[2,] - minmax(biflup.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   biflup.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -628,7 +623,7 @@ for(i in 1:100){
                         tstar = biflup.overlap.tssdf[biflup.overlap.tstar, 1],
                         sens_star = biflup.overlap.tssdf[biflup.overlap.tstar, 4],
                         spec_star = biflup.overlap.tssdf[biflup.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(biflup.idm)), na.omit(values(biflup.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(biflup.idmnorm)), na.omit(values(biflup.overlapnorm)), na.rm = T))
 
   biflup.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -640,42 +635,19 @@ for(i in 1:100){
   
   biflup.evaldf = bind_rows(biflup.evaldf, biflup.overlap.eval, biflup.idm.eval)
   
-    # Step 5: Save variable importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(biflup.maxent@results[7:26,]),
-                        percent = biflup.maxent@results[7:26],
-                        permutation = biflup.maxent@results[27:46])
-  
-  biflup.varimpdf = bind_rows(biflup.varimpdf, idm.vars)
-}
-
-write.csv(biflup.diffdf, file = "completed-evals/biflup-diff.csv")
-write.csv(biflup.evaldf, file = "completed-evals/biflup-eval.csv")
-write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
-saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
-saveRDS(biflup.idmlist, file = "biflup-idms.RData")
-
-biflup.overlapthresh <- vector(mode = "list", length = 100)
-biflup.idmthresh <- vector(mode = "list", length = 100)
-biflup.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = biflup.overlaplist[[i]]
+  # Step 5: Compare threshold values
   tstar.overlap = (biflup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(biflup.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   biflup.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = biflup.idmlist[[i]]
   tstar.idm = (biflup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(biflup.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   biflup.idmthresh[[i]] = idm.thresh
@@ -692,7 +664,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   biflup.thresholddf = bind_rows(biflup.thresholddf, shared.df)
+  
+  #   # Step 5: Save variable importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(biflup.maxent@results[7:26,]),
+  #                       percent = biflup.maxent@results[7:26],
+  #                       permutation = biflup.maxent@results[27:46])
+  # 
+  # biflup.varimpdf = bind_rows(biflup.varimpdf, idm.vars)
 }
+
+write.csv(biflup.thresholddf, file = "completed-evals/biflup-threshold.csv")
+write.csv(biflup.evaldf, file = "completed-evals/biflup-eval.csv")
+# write.csv(biflup.varimpdf, file = "completed-evals/biflup-varimport.csv")
+save(biflup.overlaplist, file = "biflup-overlaps.RData")
+save(biflup.idmlist, file = "biflup-idms.RData")
 ```
 
 ```{r biflup ensemble}
@@ -1011,9 +998,12 @@ bifpen <- bbna %>%
 ```{r bifpen maxent for loop, message = F}
 bifpen.overlaplist <- vector(mode = "list", length = 100)
 bifpen.idmlist <- vector(mode = "list", length = 100)
+bifpen.overlapthresh <- vector(mode = "list", length = 100)
+bifpen.idmthresh <- vector(mode = "list", length = 100)
 
 bifpen.evaldf <- data.frame()
-bifpen.varimpdf <- data.frame()
+bifpen.thresholddf <- data.frame()
+# bifpen.varimpdf <- data.frame()
 
 set.seed(122323)
 for(i in 1:100){
@@ -1097,8 +1087,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   bifpen.idm.tstar <- which.max(bifpen.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  bifpen.idmnorm = (bifpen.idm - minmax(bifpen.idm)[1,])/(minmax(bifpen.idm)[2,] - minmax(bifpen.idm)[1,])
+  bifpen.overlapnorm = (bifpen.overlap - minmax(bifpen.overlap)[1,])/(minmax(bifpen.overlap)[2,] - minmax(bifpen.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   bifpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -1107,7 +1100,7 @@ for(i in 1:100){
                         tstar = bifpen.overlap.tssdf[bifpen.overlap.tstar, 1],
                         sens_star = bifpen.overlap.tssdf[bifpen.overlap.tstar, 4],
                         spec_star = bifpen.overlap.tssdf[bifpen.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(bifpen.idm)), na.omit(values(bifpen.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(bifpen.idmnorm)), na.omit(values(bifpen.overlapnorm)), na.rm = T))
 
   bifpen.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -1119,42 +1112,19 @@ for(i in 1:100){
   
   bifpen.evaldf = bind_rows(bifpen.evaldf, bifpen.overlap.eval, bifpen.idm.eval)
   
-    # Step 5: Save variable importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(bifpen.maxent@results[7:26,]),
-                        percent = bifpen.maxent@results[7:26],
-                        permutation = bifpen.maxent@results[27:46])
-  
-  bifpen.varimpdf = bind_rows(bifpen.varimpdf, idm.vars)
-}
-
-write.csv(bifpen.diffdf, file = "completed-evals/bifpen-diff.csv")
-write.csv(bifpen.evaldf, file = "completed-evals/bifpen-eval.csv")
-write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
-saveRDS(biflup.overlaplist, file = "biflup-overlaps.RData")
-saveRDS(biflup.idmlist, file = "biflup-idms.RData")
-
-bifpen.overlapthresh <- vector(mode = "list", length = 100)
-bifpen.idmthresh <- vector(mode = "list", length = 100)
-bifpen.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = bifpen.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (bifpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifpen.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifpen.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = bifpen.idmlist[[i]]
   tstar.idm = (bifpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifpen.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifpen.idmthresh[[i]] = idm.thresh
@@ -1171,7 +1141,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   bifpen.thresholddf = bind_rows(bifpen.thresholddf, shared.df)
+  
+  #   # Step 5: Save variable importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(bifpen.maxent@results[7:26,]),
+  #                       percent = bifpen.maxent@results[7:26],
+  #                       permutation = bifpen.maxent@results[27:46])
+  # 
+  # bifpen.varimpdf = bind_rows(bifpen.varimpdf, idm.vars)
 }
+
+write.csv(bifpen.thresholddf, file = "completed-evals/bifpen-threshold.csv")
+write.csv(bifpen.evaldf, file = "completed-evals/bifpen-eval.csv")
+# write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
+save(biflup.overlaplist, file = "biflup-overlaps.RData")
+save(biflup.idmlist, file = "biflup-idms.RData")
 ```
 
 ```{r bifpen ensemble}
@@ -1214,9 +1199,12 @@ bifrub <- bbna %>%
 ```{r bifrub maxent for loop, message = F}
 bifrub.overlaplist <- vector(mode = "list", length = 100)
 bifrub.idmlist <- vector(mode = "list", length = 100)
+bifrub.overlapthresh <- vector(mode = "list", length = 100)
+bifrub.idmthresh <- vector(mode = "list", length = 100)
 
 bifrub.evaldf <- data.frame()
-bifrub.varimpdf <- data.frame()
+bifrub.thresholddf <- data.frame()
+# bifrub.varimpdf <- data.frame()
 
 set.seed(429024)
 for(i in 1:100){
@@ -1300,8 +1288,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   bifrub.idm.tstar <- which.max(bifrub.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  bifrub.idmnorm = (bifrub.idm - minmax(bifrub.idm)[1,])/(minmax(bifrub.idm)[2,] - minmax(bifrub.idm)[1,])
+  bifrub.overlapnorm = (bifrub.overlap - minmax(bifrub.overlap)[1,])/(minmax(bifrub.overlap)[2,] - minmax(bifrub.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   bifrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -1310,7 +1301,7 @@ for(i in 1:100){
                         tstar = bifrub.overlap.tssdf[bifrub.overlap.tstar, 1],
                         sens_star = bifrub.overlap.tssdf[bifrub.overlap.tstar, 4],
                         spec_star = bifrub.overlap.tssdf[bifrub.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(bifrub.idm)), na.omit(values(bifrub.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(bifrub.idmnorm)), na.omit(values(bifrub.overlapnorm)), na.rm = T))
 
   bifrub.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -1322,42 +1313,19 @@ for(i in 1:100){
   
   bifrub.evaldf = bind_rows(bifrub.evaldf, bifrub.overlap.eval, bifrub.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(bifrub.maxent@results[7:26,]),
-                        percent = bifrub.maxent@results[7:26],
-                        permutation = bifrub.maxent@results[27:46])
-  
-  bifrub.varimpdf = bind_rows(bifrub.varimpdf, idm.vars)
-}
-
-write.csv(bifrub.evaldf, file = "completed-evals/bifrub-eval.csv")
-write.csv(bifrub.diffdf, file = "completed-evals/bifrub-diff.csv")
-write.csv(bifrub.varimpdf, file = "completed-evals/bifrub-varimport.csv")
-saveRDS(bifrub.overlaplist, file = "bifrub-overlaps.RData")
-saveRDS(bifrub.idmlist, file = "bifrub-idms.RData")
-
-bifrub.overlapthresh <- vector(mode = "list", length = 100)
-bifrub.idmthresh <- vector(mode = "list", length = 100)
-bifrub.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = bifrub.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (bifrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifrub.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifrub.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = bifrub.idmlist[[i]]
   tstar.idm = (bifrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifrub.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifrub.idmthresh[[i]] = idm.thresh
@@ -1374,7 +1342,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   bifrub.thresholddf = bind_rows(bifrub.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(bifrub.maxent@results[7:26,]),
+  #                       percent = bifrub.maxent@results[7:26],
+  #                       permutation = bifrub.maxent@results[27:46])
+  # 
+  # bifrub.varimpdf = bind_rows(bifrub.varimpdf, idm.vars)
 }
+
+write.csv(bifrub.evaldf, file = "completed-evals/bifrub-eval.csv")
+write.csv(bifrub.thresholddf, file = "completed-evals/bifrub-threshold.csv")
+# write.csv(bifrub.varimpdf, file = "completed-evals/bifrub-varimport.csv")
+save(bifrub.overlaplist, file = "bifrub-overlaps.RData")
+save(bifrub.idmlist, file = "bifrub-idms.RData")
 ```
 
 ```{r bifrub ensemble}
@@ -1418,9 +1401,12 @@ flavcham <- bbna %>%
 ```{r flavcham maxent for loop, message = F}
 flavcham.overlaplist <- vector(mode = "list", length = 100)
 flavcham.idmlist <- vector(mode = "list", length = 100)
+flavcham.overlapthresh <- vector(mode = "list", length = 100)
+flavcham.idmthresh <- vector(mode = "list", length = 100)
 
 flavcham.evaldf <- data.frame()
-flavcham.varimpdf <- data.frame()
+flavcham.thresholddf <- data.frame()
+# flavcham.varimpdf <- data.frame()
 
 set.seed(15124)
 for(i in 1:100){
@@ -1504,8 +1490,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   flavcham.idm.tstar <- which.max(flavcham.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  flavcham.idmnorm = (flavcham.idm - minmax(flavcham.idm)[1,])/(minmax(flavcham.idm)[2,] - minmax(flavcham.idm)[1,])
+  flavcham.overlapnorm = (flavcham.overlap - minmax(flavcham.overlap)[1,])/(minmax(flavcham.overlap)[2,] - minmax(flavcham.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   flavcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -1514,7 +1503,7 @@ for(i in 1:100){
                         tstar = flavcham.overlap.tssdf[flavcham.overlap.tstar, 1],
                         sens_star = flavcham.overlap.tssdf[flavcham.overlap.tstar, 4],
                         spec_star = flavcham.overlap.tssdf[flavcham.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(flavcham.idm)), na.omit(values(flavcham.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(flavcham.idmnorm)), na.omit(values(flavcham.overlapnorm)), na.rm = T))
 
   flavcham.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -1526,42 +1515,19 @@ for(i in 1:100){
   
   flavcham.evaldf = bind_rows(flavcham.evaldf, flavcham.overlap.eval, flavcham.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(flavcham.maxent@results[7:26,]),
-                        percent = flavcham.maxent@results[7:26],
-                        permutation = flavcham.maxent@results[27:46])
-  
-  flavcham.varimpdf = bind_rows(flavcham.varimpdf, idm.vars)
-}
-
-write.csv(flavcham.evaldf, file = "completed-evals/flavcham-eval.csv")
-write.csv(flavcham.diffdf, file = "completed-evals/flavcham-diff.csv")
-write.csv(flavcham.varimpdf, file = "completed-evals/flavcham-varimport.csv")
-saveRDS(flavcham.overlaplist, file = "flavcham-overlaps.RData")
-saveRDS(flavcham.idmlist, file = "flavcham-idms.RData")
-
-flavcham.overlapthresh <- vector(mode = "list", length = 100)
-flavcham.idmthresh <- vector(mode = "list", length = 100)
-flavcham.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = flavcham.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (flavcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavcham.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavcham.overlapthresh[[i]] = overlap.thresh
-  
-  
-  idm = flavcham.idmlist[[i]]
+
   tstar.idm = (flavcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavcham.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavcham.idmthresh[[i]] = idm.thresh
@@ -1578,7 +1544,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   flavcham.thresholddf = bind_rows(flavcham.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(flavcham.maxent@results[7:26,]),
+  #                       percent = flavcham.maxent@results[7:26],
+  #                       permutation = flavcham.maxent@results[27:46])
+  # 
+  # flavcham.varimpdf = bind_rows(flavcham.varimpdf, idm.vars)
 }
+
+write.csv(flavcham.evaldf, file = "completed-evals/flavcham-eval.csv")
+write.csv(flavcham.thresholddf, file = "completed-evals/flavcham-threshold.csv")
+# write.csv(flavcham.varimpdf, file = "completed-evals/flavcham-varimport.csv")
+save(flavcham.overlaplist, file = "flavcham-overlaps.RData")
+save(flavcham.idmlist, file = "flavcham-idms.RData")
 ```
 
 ```{r flavrub ensemble}
@@ -1621,9 +1602,12 @@ flavcir <- bbna %>%
 ```{r flavcir maxent for loop, message = F}
 flavcir.overlaplist <- vector(mode = "list", length = 100)
 flavcir.idmlist <- vector(mode = "list", length = 100)
+flavcir.overlapthresh <- vector(mode = "list", length = 100)
+flavcir.idmthresh <- vector(mode = "list", length = 100)
 
 flavcir.evaldf <- data.frame()
-flavcir.varimpdf <- data.frame()
+flavcir.thresholddf <- data.frame()
+# flavcir.varimpdf <- data.frame()
 
 set.seed(163190)
 for(i in 1:100){
@@ -1707,8 +1691,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   flavcir.idm.tstar <- which.max(flavcir.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  flavcir.idmnorm = (flavcir.idm - minmax(flavcir.idm)[1,])/(minmax(flavcir.idm)[2,] - minmax(flavcir.idm)[1,])
+  flavcir.overlapnorm = (flavcir.overlap - minmax(flavcir.overlap)[1,])/(minmax(flavcir.overlap)[2,] - minmax(flavcir.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   flavcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -1717,7 +1704,7 @@ for(i in 1:100){
                         tstar = flavcir.overlap.tssdf[flavcir.overlap.tstar, 1],
                         sens_star = flavcir.overlap.tssdf[flavcir.overlap.tstar, 4],
                         spec_star = flavcir.overlap.tssdf[flavcir.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(flavcir.idm)), na.omit(values(flavcir.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(flavcir.idmnorm)), na.omit(values(flavcir.overlapnorm)), na.rm = T))
 
   flavcir.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -1729,42 +1716,19 @@ for(i in 1:100){
   
   flavcir.evaldf = bind_rows(flavcir.evaldf, flavcir.overlap.eval, flavcir.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(flavcir.maxent@results[7:26,]),
-                        percent = flavcir.maxent@results[7:26],
-                        permutation = flavcir.maxent@results[27:46])
-  
-  flavcir.varimpdf = bind_rows(flavcir.varimpdf, idm.vars)
-}
-
-write.csv(flavcir.evaldf, file = "completed-evals/flavcir-eval.csv")
-write.csv(flavcir.diffdf, file = "completed-evals/flavcir-diff.csv")
-write.csv(flavcir.varimpdf, file = "completed-evals/flavcir-varimport.csv")
-saveRDS(flavcir.overlaplist, file = "flavcir-overlaps.RData")
-saveRDS(flavcir.idmlist, file = "flavcir-idms.RData")
-
-flavcir.overlapthresh <- vector(mode = "list", length = 100)
-flavcir.idmthresh <- vector(mode = "list", length = 100)
-flavcir.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = flavcir.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (flavcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavcir.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavcir.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = flavcir.idmlist[[i]]
   tstar.idm = (flavcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavcir.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavcir.idmthresh[[i]] = idm.thresh
@@ -1781,7 +1745,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   flavcir.thresholddf = bind_rows(flavcir.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(flavcir.maxent@results[7:26,]),
+  #                       percent = flavcir.maxent@results[7:26],
+  #                       permutation = flavcir.maxent@results[27:46])
+  # 
+  # flavcir.varimpdf = bind_rows(flavcir.varimpdf, idm.vars)
 }
+
+write.csv(flavcir.evaldf, file = "completed-evals/flavcir-eval.csv")
+write.csv(flavcir.thresholddf, file = "completed-evals/flavcir-threshold.csv")
+# write.csv(flavcir.varimpdf, file = "completed-evals/flavcir-varimport.csv")
+save(flavcir.overlaplist, file = "flavcir-overlaps.RData")
+save(flavcir.idmlist, file = "flavcir-idms.RData")
 ```
 
 ```{r flavcir ensemble}
@@ -1825,9 +1804,12 @@ flavlup <- bbna %>%
 ```{r flavlup maxent for loop, message = F}
 flavlup.overlaplist <- vector(mode = "list", length = 100)
 flavlup.idmlist <- vector(mode = "list", length = 100)
+flavlup.overlapthresh <- vector(mode = "list", length = 100)
+flavlup.idmthresh <- vector(mode = "list", length = 100)
 
 flavlup.evaldf <- data.frame()
-flavlup.varimpdf <- data.frame()
+flavlup.thresholddf <- data.frame()
+# flavlup.varimpdf <- data.frame()
 
 set.seed(11624)
 for(i in 1:100){
@@ -1911,8 +1893,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   flavlup.idm.tstar <- which.max(flavlup.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  flavlup.idmnorm = (flavlup.idm - minmax(flavlup.idm)[1,])/(minmax(flavlup.idm)[2,] - minmax(flavlup.idm)[1,])
+  flavlup.overlapnorm = (flavlup.overlap - minmax(flavlup.overlap)[1,])/(minmax(flavlup.overlap)[2,] - minmax(flavlup.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   flavlup.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -1921,7 +1906,7 @@ for(i in 1:100){
                         tstar = flavcham.overlap.tssdf[flavlup.overlap.tstar, 1],
                         sens_star = flavlup.overlap.tssdf[flavlup.overlap.tstar, 4],
                         spec_star = flavlup.overlap.tssdf[flavlup.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(flavlup.idm)), na.omit(values(flavlup.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(flavlup.idmnorm)), na.omit(values(flavlup.overlapnorm)), na.rm = T))
 
   flavlup.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -1933,42 +1918,19 @@ for(i in 1:100){
   
   flavlup.evaldf = bind_rows(flavlup.evaldf, flavlup.overlap.eval, flavlup.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(flavlup.maxent@results[7:26,]),
-                        percent = flavlup.maxent@results[7:26],
-                        permutation = flavlup.maxent@results[27:46])
-  
-  flavlup.varimpdf = bind_rows(flavlup.varimpdf, idm.vars)
-}
-
-write.csv(flavlup.evaldf, file = "completed-evals/flavlup-eval.csv")
-write.csv(flavlup.diffdf, file = "completed-evals/flavlup-diff.csv")
-write.csv(flavlup.varimpdf, file = "completed-evals/flavlup-varimport.csv")
-saveRDS(flavlup.overlaplist, file = "flavlup-overlaps.RData")
-saveRDS(flavlup.idmlist, file = "flavlup-idms.RData")
-
-flavlup.overlapthresh <- vector(mode = "list", length = 100)
-flavlup.idmthresh <- vector(mode = "list", length = 100)
-flavlup.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = flavlup.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (flavlup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavlup.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavlup.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = flavlup.idmlist[[i]]
   tstar.idm = (flavlup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavlup.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavlup.idmthresh[[i]] = idm.thresh
@@ -1985,7 +1947,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   flavlup.thresholddf = bind_rows(flavlup.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(flavlup.maxent@results[7:26,]),
+  #                       percent = flavlup.maxent@results[7:26],
+  #                       permutation = flavlup.maxent@results[27:46])
+  # 
+  # flavlup.varimpdf = bind_rows(flavlup.varimpdf, idm.vars)
 }
+
+write.csv(flavlup.evaldf, file = "completed-evals/flavlup-eval.csv")
+write.csv(flavlup.thresholddf, file = "completed-evals/flavlup-threshold.csv")
+# write.csv(flavlup.varimpdf, file = "completed-evals/flavlup-varimport.csv")
+save(flavlup.overlaplist, file = "flavlup-overlaps.RData")
+save(flavlup.idmlist, file = "flavlup-idms.RData")
 ```
 
 ```{r flavlup ensemble}
@@ -2028,9 +2005,12 @@ flavpen <- bbna %>%
 ```{r flavpen maxent for loop, message = F}
 flavpen.overlaplist <- vector(mode = "list", length = 100)
 flavpen.idmlist <- vector(mode = "list", length = 100)
+flavpen.overlapthresh <- vector(mode = "list", length = 100)
+flavpen.idmthresh <- vector(mode = "list", length = 100)
 
 flavpen.evaldf <- data.frame()
-flavpen.varimpdf <- data.frame()
+flavpen.thresholddf <- data.frame()
+# flavpen.varimpdf <- data.frame()
 
 set.seed(11124)
 for(i in 1:100){
@@ -2114,8 +2094,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   flavpen.idm.tstar <- which.max(flavpen.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  flavpen.idmnorm = (flavpen.idm - minmax(flavpen.idm)[1,])/(minmax(flavpen.idm)[2,] - minmax(flavpen.idm)[1,])
+  flavpen.overlapnorm = (flavpen.overlap - minmax(flavpen.overlap)[1,])/(minmax(flavpen.overlap)[2,] - minmax(flavpen.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   flavpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -2124,7 +2107,7 @@ for(i in 1:100){
                         tstar = flavpen.overlap.tssdf[flavpen.overlap.tstar, 1],
                         sens_star = flavpen.overlap.tssdf[flavpen.overlap.tstar, 4],
                         spec_star = flavpen.overlap.tssdf[flavpen.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(flavpen.idm)), na.omit(values(flavpen.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(flavpen.idmnorm)), na.omit(values(flavpen.overlapnorm)), na.rm = T))
 
   flavpen.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -2136,42 +2119,19 @@ for(i in 1:100){
   
   flavpen.evaldf = bind_rows(flavpen.evaldf, flavpen.overlap.eval, flavpen.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(flavpen.maxent@results[7:26,]),
-                        percent = flavpen.maxent@results[7:26],
-                        permutation = flavpen.maxent@results[27:46])
-  
-  flavpen.varimpdf = bind_rows(flavpen.varimpdf, idm.vars)
-}
-
-write.csv(flavpen.evaldf, file = "completed-evals/flavpen-eval.csv")
-write.csv(flavpen.diffdf, file = "completed-evals/flavpen-diff.csv")
-write.csv(flavpen.varimpdf, file = "completed-evals/flavpen-varimport.csv")
-saveRDS(flavpen.overlaplist, file = "flavpen-overlaps.RData")
-saveRDS(flavpen.idmlist, file = "flavpen-idms.RData")
-
-flavpen.overlapthresh <- vector(mode = "list", length = 100)
-flavpen.idmthresh <- vector(mode = "list", length = 100)
-flavpen.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = flavpen.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (flavpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavpen.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavpen.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = flavpen.idmlist[[i]]
   tstar.idm = (flavpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavpen.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavpen.idmthresh[[i]] = idm.thresh
@@ -2188,7 +2148,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   flavpen.thresholddf = bind_rows(flavpen.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(flavpen.maxent@results[7:26,]),
+  #                       percent = flavpen.maxent@results[7:26],
+  #                       permutation = flavpen.maxent@results[27:46])
+  # 
+  # flavpen.varimpdf = bind_rows(flavpen.varimpdf, idm.vars)
 }
+
+write.csv(flavpen.evaldf, file = "completed-evals/flavpen-eval.csv")
+write.csv(flavpen.thresholddf, file = "completed-evals/flavpen-threshold.csv")
+# write.csv(flavpen.varimpdf, file = "completed-evals/flavpen-varimport.csv")
+save(flavpen.overlaplist, file = "flavpen-overlaps.RData")
+save(flavpen.idmlist, file = "flavpen-idms.RData")
 ```
 
 ```{r flavpen ensemble}
@@ -2231,9 +2206,12 @@ flavrub <- bbna %>%
 ```{r flavrub maxent for loop, message = F}
 flavrub.overlaplist <- vector(mode = "list", length = 100)
 flavrub.idmlist <- vector(mode = "list", length = 100)
+flavrub.overlapthresh <- vector(mode = "list", length = 100)
+flavrub.idmthresh <- vector(mode = "list", length = 100)
 
 flavrub.evaldf <- data.frame()
-flavrub.varimpdf <- data.frame()
+flavrub.thresholddf <- data.frame()
+# flavrub.varimpdf <- data.frame()
 
 set.seed(160124)
 for(i in 1:100){
@@ -2317,8 +2295,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   flavrub.idm.tstar <- which.max(flavrub.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  flavrub.idmnorm = (flavrub.idm - minmax(flavrub.idm)[1,])/(minmax(flavrub.idm)[2,] - minmax(flavrub.idm)[1,])
+  flavrub.overlapnorm = (flavrub.overlap - minmax(flavrub.overlap)[1,])/(minmax(flavrub.overlap)[2,] - minmax(flavrub.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   flavrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -2327,7 +2308,7 @@ for(i in 1:100){
                         tstar = flavrub.overlap.tssdf[flavrub.overlap.tstar, 1],
                         sens_star = flavrub.overlap.tssdf[flavrub.overlap.tstar, 4],
                         spec_star = flavrub.overlap.tssdf[flavrub.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(flavrub.idm)), na.omit(values(flavrub.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(flavrub.idmnorm)), na.omit(values(flavrub.overlapnorm)), na.rm = T))
 
   flavrub.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -2338,43 +2319,20 @@ for(i in 1:100){
                         spec_star = flavrub.idm.tssdf[flavrub.idm.tstar, 5])
   
   flavrub.evaldf = bind_rows(flavrub.evaldf, flavrub.overlap.eval, flavrub.idm.eval)
-  
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(flavrub.maxent@results[7:26,]),
-                        percent = flavrub.maxent@results[7:26],
-                        permutation = flavrub.maxent@results[27:46])
-  
-  flavrub.varimpdf = bind_rows(flavrub.varimpdf, idm.vars)
-}
 
-write.csv(flavrub.evaldf, file = "completed-evals/flavrub-eval.csv")
-write.csv(flavrub.diffdf, file = "completed-evals/flavrub-diff.csv")
-write.csv(flavrub.varimpdf, file = "completed-evals/flavrub-varimport.csv")
-saveRDS(flavrub.overlaplist, file = "flavrub-overlaps.RData")
-saveRDS(flavrub.idmlist, file = "flavrub-idms.RData")
-
-flavrub.overlapthresh <- vector(mode = "list", length = 100)
-flavrub.idmthresh <- vector(mode = "list", length = 100)
-flavrub.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = flavrub.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (flavrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavrub.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavrub.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = flavrub.idmlist[[i]]
   tstar.idm = (flavrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavrub.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavrub.idmthresh[[i]] = idm.thresh
@@ -2391,7 +2349,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   flavrub.thresholddf = bind_rows(flavrub.thresholddf, shared.df)
+    
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(flavrub.maxent@results[7:26,]),
+  #                       percent = flavrub.maxent@results[7:26],
+  #                       permutation = flavrub.maxent@results[27:46])
+  # 
+  # flavrub.varimpdf = bind_rows(flavrub.varimpdf, idm.vars)
 }
+
+write.csv(flavrub.evaldf, file = "completed-evals/flavrub-eval.csv")
+write.csv(flavrub.thresholddf, file = "completed-evals/flavrub-threshold.csv")
+# write.csv(flavrub.varimpdf, file = "completed-evals/flavrub-varimport.csv")
+save(flavrub.overlaplist, file = "flavrub-overlaps.RData")
+save(flavrub.idmlist, file = "flavrub-idms.RData")
 ```
 
 ```{r flavrub ensemble}
@@ -2436,9 +2409,12 @@ mixcham <- bbna %>%
 ```{r mixcham maxent for loop, message = F}
 mixcham.overlaplist <- vector(mode = "list", length = 100)
 mixcham.idmlist <- vector(mode = "list", length = 100)
+mixcham.overlapthresh <- vector(mode = "list", length = 100)
+mixcham.idmthresh <- vector(mode = "list", length = 100)
 
 mixcham.evaldf <- data.frame()
-mixcham.varimpdf <- data.frame()
+mixcham.thresholddf <- data.frame()
+# mixcham.varimpdf <- data.frame()
 
 set.seed(51445)
 for(i in 1:100){
@@ -2522,6 +2498,9 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixcham.idm.tstar <- which.max(mixcham.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  mixcham.idmnorm = (mixcham.idm - minmax(mixcham.idm)[1,])/(minmax(mixcham.idm)[2,] - minmax(mixcham.idm)[1,])
+  mixcham.overlapnorm = (mixcham.overlap - minmax(mixcham.overlap)[1,])/(minmax(mixcham.overlap)[2,] - minmax(mixcham.overlap)[1,])
   
   ## Step 4b: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -2532,7 +2511,7 @@ for(i in 1:100){
                         tstar = mixcham.overlap.tssdf[mixcham.overlap.tstar, 1],
                         sens_star = mixcham.overlap.tssdf[mixcham.overlap.tstar, 4],
                         spec_star = mixcham.overlap.tssdf[mixcham.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(mixcham.idm)), na.omit(values(mixcham.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(mixcham.idmnorm)), na.omit(values(mixcham.overlapnorm)), na.rm = T))
 
   mixcham.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -2544,42 +2523,19 @@ for(i in 1:100){
   
   mixcham.evaldf = bind_rows(mixcham.evaldf, mixcham.overlap.eval, mixcham.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(mixcham.maxent@results[7:26,]),
-                        percent = mixcham.maxent@results[7:26],
-                        permutation = mixcham.maxent@results[27:46])
-  
-  mixcham.varimpdf = bind_rows(mixcham.varimpdf, idm.vars)
-}
-
-write.csv(mixcham.evaldf, file = "completed-evals/mixcham-eval.csv")
-write.csv(mixcham.diffdf, file = "completed-evals/mixcham-diff.csv")
-write.csv(mixcham.varimpdf, file = "completed-evals/mixcham-varimport.csv")
-saveRDS(mixcham.overlaplist, file = "mixcham-overlaps.RData")
-saveRDS(mixcham.idmlist, file = "mixcham-idms.RData")
-
-mixcham.overlapthresh <- vector(mode = "list", length = 100)
-mixcham.idmthresh <- vector(mode = "list", length = 100)
-mixcham.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = mixcham.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (mixcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixcham.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixcham.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = mixcham.idmlist[[i]]
   tstar.idm = (mixcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixcham.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixcham.idmthresh[[i]] = idm.thresh
@@ -2596,7 +2552,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   mixcham.thresholddf = bind_rows(mixcham.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(mixcham.maxent@results[7:26,]),
+  #                       percent = mixcham.maxent@results[7:26],
+  #                       permutation = mixcham.maxent@results[27:46])
+  # 
+  # mixcham.varimpdf = bind_rows(mixcham.varimpdf, idm.vars)
 }
+
+write.csv(mixcham.evaldf, file = "completed-evals/mixcham-eval.csv")
+write.csv(mixcham.thresholddf, file = "completed-evals/mixcham-threshold.csv")
+# write.csv(mixcham.varimpdf, file = "completed-evals/mixcham-varimport.csv")
+save(mixcham.overlaplist, file = "mixcham-overlaps.RData")
+save(mixcham.idmlist, file = "mixcham-idms.RData")
 ```
 
 ```{r mixcham ensemble}
@@ -2640,9 +2611,12 @@ mixcir <- bbna %>%
 ```{r mixcir maxent for loop, message = F}
 mixcir.overlaplist <- vector(mode = "list", length = 100)
 mixcir.idmlist <- vector(mode = "list", length = 100)
+mixcir.overlapthresh <- vector(mode = "list", length = 100)
+mixcir.idmthresh <- vector(mode = "list", length = 100)
 
 mixcir.evaldf <- data.frame()
-mixcir.varimpdf <- data.frame()
+mixcir.thresholddf <- data.frame()
+# mixcir.varimpdf <- data.frame()
 
 set.seed(290424)
 for(i in 1:100){
@@ -2726,6 +2700,9 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixcir.idm.tstar <- which.max(mixcir.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  mixcir.idmnorm = (mixcir.idm - minmax(mixcir.idm)[1,])/(minmax(mixcir.idm)[2,] - minmax(mixcir.idm)[1,])
+  mixcir.overlapnorm = (mixcir.overlap - minmax(mixcir.overlap)[1,])/(minmax(mixcir.overlap)[2,] - minmax(mixcir.overlap)[1,])
   
   ## Step 4b: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -2736,7 +2713,7 @@ for(i in 1:100){
                         tstar = mixcir.overlap.tssdf[mixcir.overlap.tstar, 1],
                         sens_star = mixcir.overlap.tssdf[mixcir.overlap.tstar, 4],
                         spec_star = mixcir.overlap.tssdf[mixcir.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(mixcir.idm)), na.omit(values(mixcir.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(mixcir.idmnorm)), na.omit(values(mixcir.overlapnorm)), na.rm = T))
 
   mixcir.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -2748,42 +2725,19 @@ for(i in 1:100){
   
   mixcir.evaldf = bind_rows(mixcir.evaldf, mixcir.overlap.eval, mixcir.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(mixcir.maxent@results[7:26,]),
-                        percent = mixcir.maxent@results[7:26],
-                        permutation = mixcir.maxent@results[27:46])
-  
-  mixcir.varimpdf = bind_rows(mixcir.varimpdf, idm.vars)
-}
-
-write.csv(mixcir.evaldf, file = "completed-evals/mixcir-eval.csv")
-write.csv(mixcir.diffdf, file = "completed-evals/mixcir-diff.csv")
-write.csv(mixcir.varimpdf, file = "completed-evals/mixcir-varimport.csv")
-saveRDS(mixcir.overlaplist, file = "mixcir-overlaps.RData")
-saveRDS(mixcir.idmlist, file = "mixcir-idms.RData")
-
-mixcir.overlapthresh <- vector(mode = "list", length = 100)
-mixcir.idmthresh <- vector(mode = "list", length = 100)
-mixcir.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = mixcir.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (mixcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixcir.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixcir.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = mixcir.idmlist[[i]]
   tstar.idm = (mixcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixcir.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixcir.idmthresh[[i]] = idm.thresh
@@ -2800,7 +2754,23 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   mixcir.thresholddf = bind_rows(mixcir.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(mixcir.maxent@results[7:26,]),
+  #                       percent = mixcir.maxent@results[7:26],
+  #                       permutation = mixcir.maxent@results[27:46])
+  # 
+  # mixcir.varimpdf = bind_rows(mixcir.varimpdf, idm.vars)
 }
+
+write.csv(mixcir.evaldf, file = "completed-evals/mixcir-eval.csv")
+write.csv(mixcir.thresholddf, file = "completed-evals/mixcir-threshold.csv")
+# write.csv(mixcir.varimpdf, file = "completed-evals/mixcir-varimport.csv")
+save(mixcir.overlaplist, file = "mixcir-overlaps.RData")
+save(mixcir.idmlist, file = "mixcir-idms.RData")
+
 ```
 
 ```{r mixcir ensemble}
@@ -2844,9 +2814,12 @@ mixlup <- bbna %>%
 ```{r mixlup maxent for loop, message = F}
 mixlup.overlaplist <- vector(mode = "list", length = 100)
 mixlup.idmlist <- vector(mode = "list", length = 100)
+mixlup.overlapthresh <- vector(mode = "list", length = 100)
+mixlup.idmthresh <- vector(mode = "list", length = 100)
 
 mixlup.evaldf <- data.frame()
-mixlup.varimpdf <- data.frame()
+mixlup.thresholddf <- data.frame()
+# mixlup.varimpdf <- data.frame()
 
 set.seed(232024)
 for(i in 1:100){
@@ -2930,8 +2903,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixlup.idm.tstar <- which.max(mixlup.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  mixlup.idmnorm = (mixlup.idm - minmax(mixlup.idm)[1,])/(minmax(mixlup.idm)[2,] - minmax(mixlup.idm)[1,])
+  mixlup.overlapnorm = (mixlup.overlap - minmax(mixlup.overlap)[1,])/(minmax(mixlup.overlap)[2,] - minmax(mixlup.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   mixlup.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -2940,7 +2916,7 @@ for(i in 1:100){
                         tstar = mixlup.overlap.tssdf[mixlup.overlap.tstar, 1],
                         sens_star = mixlup.overlap.tssdf[mixlup.overlap.tstar, 4],
                         spec_star = mixlup.overlap.tssdf[mixlup.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(mixlup.idm)), na.omit(values(mixlup.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(mixlup.idmnorm)), na.omit(values(mixlup.overlapnorm)), na.rm = T))
 
   mixlup.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -2952,42 +2928,19 @@ for(i in 1:100){
   
   mixlup.evaldf = bind_rows(mixlup.evaldf, mixlup.overlap.eval, mixlup.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(mixlup.maxent@results[7:26,]),
-                        percent = mixlup.maxent@results[7:26],
-                        permutation = mixlup.maxent@results[27:46])
-  
-  mixlup.varimpdf = bind_rows(mixlup.varimpdf, idm.vars)
-}
-
-write.csv(mixlup.evaldf, file = "completed-evals/mixlup-eval.csv")
-write.csv(mixlup.diffdf, file = "completed-evals/mixlup-diff.csv")
-write.csv(mixlup.varimpdf, file = "completed-evals/mixlup-varimport.csv")
-saveRDS(mixlup.overlaplist, file = "mixlup-overlaps.RData")
-saveRDS(mixlup.idmlist, file = "mixlup-idms.RData")
-
-mixlup.overlapthresh <- vector(mode = "list", length = 100)
-mixlup.idmthresh <- vector(mode = "list", length = 100)
-mixlup.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = mixlup.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (mixlup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixlup.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixlup.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = mixlup.idmlist[[i]]
   tstar.idm = (mixlup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixlup.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixlup.idmthresh[[i]] = idm.thresh
@@ -3004,7 +2957,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   mixlup.thresholddf = bind_rows(mixlup.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(mixlup.maxent@results[7:26,]),
+  #                       percent = mixlup.maxent@results[7:26],
+  #                       permutation = mixlup.maxent@results[27:46])
+  # 
+  # mixlup.varimpdf = bind_rows(mixlup.varimpdf, idm.vars)
 }
+
+write.csv(mixlup.evaldf, file = "completed-evals/mixlup-eval.csv")
+write.csv(mixlup.thresholddf, file = "completed-evals/mixlup-threshold.csv")
+# write.csv(mixlup.varimpdf, file = "completed-evals/mixlup-varimport.csv")
+save(mixlup.overlaplist, file = "mixlup-overlaps.RData")
+save(mixlup.idmlist, file = "mixlup-idms.RData")
 ```
 
 ```{r mixlup ensemble}
@@ -3048,9 +3016,12 @@ mixpen <- bbna %>%
 ```{r mixpen maxent for loop, message = F}
 mixpen.overlaplist <- vector(mode = "list", length = 100)
 mixpen.idmlist <- vector(mode = "list", length = 100)
+mixpen.overlapthresh <- vector(mode = "list", length = 100)
+mixpen.idmthresh <- vector(mode = "list", length = 100)
 
 mixpen.evaldf <- data.frame()
-mixpen.varimpdf <- data.frame()
+mixpen.thresholddf <- data.frame()
+# mixpen.varimpdf <- data.frame()
 
 set.seed(208483)
 for(i in 1:100){
@@ -3134,8 +3105,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixpen.idm.tstar <- which.max(mixpen.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  mixpen.idmnorm = (mixpen.idm - minmax(mixpen.idm)[1,])/(minmax(mixpen.idm)[2,] - minmax(mixpen.idm)[1,])
+  mixpen.overlapnorm = (mixpen.overlap - minmax(mixpen.overlap)[1,])/(minmax(mixpen.overlap)[2,] - minmax(mixpen.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   mixpen.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -3144,7 +3118,7 @@ for(i in 1:100){
                         tstar = mixpen.overlap.tssdf[mixpen.overlap.tstar, 1],
                         sens_star = mixpen.overlap.tssdf[mixpen.overlap.tstar, 4],
                         spec_star = mixpen.overlap.tssdf[mixpen.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(mixpen.idm)), na.omit(values(mixpen.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(mixpen.idmnorm)), na.omit(values(mixpen.overlapnorm)), na.rm = T))
 
   mixpen.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -3156,42 +3130,19 @@ for(i in 1:100){
   
   mixpen.evaldf = bind_rows(mixpen.evaldf, mixpen.overlap.eval, mixpen.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(mixpen.maxent@results[7:26,]),
-                        percent = mixpen.maxent@results[7:26],
-                        permutation = mixpen.maxent@results[27:46])
-  
-  mixpen.varimpdf = bind_rows(mixpen.varimpdf, idm.vars)
-}
-
-write.csv(mixpen.evaldf, file = "completed-evals/mixpen-eval.csv")
-write.csv(mixpen.diffdf, file = "completed-evals/mixpen-diff.csv")
-write.csv(mixpen.varimpdf, file = "completed-evals/mixpen-varimport.csv")
-saveRDS(mixpen.overlaplist, file = "mixpen-overlaps.RData")
-saveRDS(mixpen.idmlist, file = "mixpen-idms.RData")
-
-mixpen.overlapthresh <- vector(mode = "list", length = 100)
-mixpen.idmthresh <- vector(mode = "list", length = 100)
-mixpen.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = mixpen.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (mixpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixpen.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixpen.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = mixpen.idmlist[[i]]
   tstar.idm = (mixpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixpen.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixpen.idmthresh[[i]] = idm.thresh
@@ -3208,7 +3159,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   mixpen.thresholddf = bind_rows(mixpen.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(mixpen.maxent@results[7:26,]),
+  #                       percent = mixpen.maxent@results[7:26],
+  #                       permutation = mixpen.maxent@results[27:46])
+  # 
+  # mixpen.varimpdf = bind_rows(mixpen.varimpdf, idm.vars)
 }
+
+write.csv(mixpen.evaldf, file = "completed-evals/mixpen-eval.csv")
+write.csv(mixpen.thresholddf, file = "completed-evals/mixpen-threshold.csv")
+# write.csv(mixpen.varimpdf, file = "completed-evals/mixpen-varimport.csv")
+save(mixpen.overlaplist, file = "mixpen-overlaps.RData")
+save(mixpen.idmlist, file = "mixpen-idms.RData")
 ```
 
 ```{r mixpen ensemble}
@@ -3252,9 +3218,12 @@ mixrub <- bbna %>%
 ```{r mixrub maxent for loop, message = F}
 mixrub.overlaplist <- vector(mode = "list", length = 100)
 mixrub.idmlist <- vector(mode = "list", length = 100)
+mixrub.overlapthresh <- vector(mode = "list", length = 100)
+mixrub.idmthresh <- vector(mode = "list", length = 100)
 
 mixrub.evaldf <- data.frame()
-mixrub.varimpdf <- data.frame()
+mixrub.thresholddf <- data.frame()
+# mixrub.varimpdf <- data.frame()
 
 set.seed(121023)
 for(i in 1:100){
@@ -3338,8 +3307,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixrub.idm.tstar <- which.max(mixrub.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  mixrub.idmnorm = (mixrub.idm - minmax(mixrub.idm)[1,])/(minmax(mixrub.idm)[2,] - minmax(mixrub.idm)[1,])
+  mixrub.overlapnorm = (mixrub.overlap - minmax(mixrub.overlap)[1,])/(minmax(mixrub.overlap)[2,] - minmax(mixrub.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   mixrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -3348,7 +3320,7 @@ for(i in 1:100){
                         tstar = mixrub.overlap.tssdf[mixrub.overlap.tstar, 1],
                         sens_star = mixrub.overlap.tssdf[mixrub.overlap.tstar, 4],
                         spec_star = mixrub.overlap.tssdf[mixrub.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(mixrub.idm)), na.omit(values(mixrub.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(mixrub.idmnorm)), na.omit(values(mixrub.overlapnorm)), na.rm = T))
 
   mixrub.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -3359,43 +3331,20 @@ for(i in 1:100){
                         spec_star = mixrub.idm.tssdf[mixrub.idm.tstar, 5])
   
   mixrub.evaldf = bind_rows(mixrub.evaldf, mixrub.overlap.eval, mixrub.idm.eval)
-  
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(mixrub.maxent@results[7:26,]),
-                        percent = mixrub.maxent@results[7:26],
-                        permutation = mixrub.maxent@results[27:46])
-  
-  mixrub.varimpdf = bind_rows(mixrub.varimpdf, idm.vars)
-}
 
-write.csv(mixrub.evaldf, file = "completed-evals/mixrub-eval.csv")
-write.csv(mixrub.diffdf, file = "completed-evals/mixrub-diff.csv")
-write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
-saveRDS(mixrub.overlaplist, file = "mixrub-overlaps.RData")
-saveRDS(mixrub.idmlist, file = "mixrub-idms.RData")
-
-mixrub.overlapthresh <- vector(mode = "list", length = 100)
-mixrub.idmthresh <- vector(mode = "list", length = 100)
-mixrub.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = mixrub.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (mixrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixrub.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixrub.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = mixrub.idmlist[[i]]
   tstar.idm = (mixrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixrub.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixrub.idmthresh[[i]] = idm.thresh
@@ -3412,7 +3361,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   mixrub.thresholddf = bind_rows(mixrub.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(mixrub.maxent@results[7:26,]),
+  #                       percent = mixrub.maxent@results[7:26],
+  #                       permutation = mixrub.maxent@results[27:46])
+  # 
+  # mixrub.varimpdf = bind_rows(mixrub.varimpdf, idm.vars)
 }
+
+write.csv(mixrub.evaldf, file = "completed-evals/mixrub-eval.csv")
+write.csv(mixrub.thresholddf, file = "completed-evals/mixrub-threshold.csv")
+# write.csv(mixrub.varimpdf, file = "completed-evals/mixrub-varimport.csv")
+save(mixrub.overlaplist, file = "mixrub-overlaps.RData")
+save(mixrub.idmlist, file = "mixrub-idms.RData")
 ```
 
 ```{r mixrub ensemble}
@@ -3716,9 +3680,12 @@ voscham <- bbna %>%
 ```{r voscham maxent for loop, message = F}
 voscham.overlaplist <- vector(mode = "list", length = 100)
 voscham.idmlist <- vector(mode = "list", length = 100)
+voscham.overlapthresh <- vector(mode = "list", length = 100)
+voscham.idmthresh <- vector(mode = "list", length = 100)
 
 voscham.evaldf <- data.frame()
-voscham.varimpdf <- data.frame()
+voscham.thresholddf <- data.frame()
+# voscham.varimpdf <- data.frame()
 
 set.seed(1301143)
 for(i in 1:100){
@@ -3802,8 +3769,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   voscham.idm.tstar <- which.max(voscham.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  voscham.idmnorm = (voscham.idm - minmax(voscham.idm)[1,])/(minmax(voscham.idm)[2,] - minmax(voscham.idm)[1,])
+  voscham.overlapnorm = (voscham.overlap - minmax(voscham.overlap)[1,])/(minmax(voscham.overlap)[2,] - minmax(voscham.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   voscham.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -3812,7 +3782,7 @@ for(i in 1:100){
                         tstar = voscham.overlap.tssdf[voscham.overlap.tstar, 1],
                         sens_star = voscham.overlap.tssdf[voscham.overlap.tstar, 4],
                         spec_star = voscham.overlap.tssdf[voscham.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(voscham.idm)), na.omit(values(voscham.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(voscham.idmnorm)), na.omit(values(voscham.overlapnorm)), na.rm = T))
 
   voscham.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -3824,42 +3794,19 @@ for(i in 1:100){
   
   voscham.evaldf = bind_rows(voscham.evaldf, voscham.overlap.eval, voscham.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(voscham.maxent@results[7:26,]),
-                        percent = voscham.maxent@results[7:26],
-                        permutation = voscham.maxent@results[27:46])
-  
-  voscham.varimpdf = bind_rows(voscham.varimpdf, idm.vars)
-}
-
-write.csv(voscham.evaldf, file = "completed-evals/voscham-eval.csv")
-write.csv(voscham.diffdf, file = "completed-evals/voscham-diff.csv")
-write.csv(voscham.varimpdf, file = "completed-evals/voscham-varimport.csv")
-saveRDS(voscham.overlaplist, file = "voscham-overlaps.RData")
-saveRDS(voscham.idmlist, file = "voscham-idms.RData")
-
-voscham.overlapthresh <- vector(mode = "list", length = 100)
-voscham.idmthresh <- vector(mode = "list", length = 100)
-voscham.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = voscham.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (voscham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voscham.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voscham.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = voscham.idmlist[[i]]
   tstar.idm = (voscham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voscham.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voscham.idmthresh[[i]] = idm.thresh
@@ -3876,7 +3823,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   voscham.thresholddf = bind_rows(voscham.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(voscham.maxent@results[7:26,]),
+  #                       percent = voscham.maxent@results[7:26],
+  #                       permutation = voscham.maxent@results[27:46])
+  # 
+  # voscham.varimpdf = bind_rows(voscham.varimpdf, idm.vars)
 }
+
+write.csv(voscham.evaldf, file = "completed-evals/voscham-eval.csv")
+write.csv(voscham.thresholddf, file = "completed-evals/voscham-threshold.csv")
+# write.csv(voscham.varimpdf, file = "completed-evals/voscham-varimport.csv")
+save(voscham.overlaplist, file = "voscham-overlaps.RData")
+save(voscham.idmlist, file = "voscham-idms.RData")
 ```
 
 ```{r voscham ensemble}
@@ -3920,9 +3882,12 @@ voscir <- bbna %>%
 ```{r voscir maxent for loop, message = F}
 voscir.overlaplist <- vector(mode = "list", length = 100)
 voscir.idmlist <- vector(mode = "list", length = 100)
+voscir.overlapthresh <- vector(mode = "list", length = 100)
+voscir.idmthresh <- vector(mode = "list", length = 100)
 
 voscir.evaldf <- data.frame()
-voscir.varimpdf <- data.frame()
+voscir.thresholddf <- data.frame()
+# voscir.varimpdf <- data.frame()
 
 set.seed(261402)
 for(i in 1:100){
@@ -4006,8 +3971,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   voscir.idm.tstar <- which.max(voscir.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  voscir.idmnorm = (voscir.idm - minmax(voscir.idm)[1,])/(minmax(voscir.idm)[2,] - minmax(voscir.idm)[1,])
+  voscir.overlapnorm = (voscir.overlap - minmax(voscir.overlap)[1,])/(minmax(voscir.overlap)[2,] - minmax(voscir.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   voscir.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -4016,7 +3984,7 @@ for(i in 1:100){
                         tstar = voscir.overlap.tssdf[voscir.overlap.tstar, 1],
                         sens_star = voscir.overlap.tssdf[voscir.overlap.tstar, 4],
                         spec_star = voscir.overlap.tssdf[voscir.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(voscir.idm)), na.omit(values(voscir.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(voscir.idmnorm)), na.omit(values(voscir.overlapnorm)), na.rm = T))
 
   voscir.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -4028,42 +3996,19 @@ for(i in 1:100){
   
   voscir.evaldf = bind_rows(voscir.evaldf, voscir.overlap.eval, voscir.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(voscir.maxent@results[7:26,]),
-                        percent = voscir.maxent@results[7:26],
-                        permutation = voscir.maxent@results[27:46])
-  
-  voscir.varimpdf = bind_rows(voscir.varimpdf, idm.vars)
-}
-
-write.csv(voscir.evaldf, file = "completed-evals/voscir-eval.csv")
-write.csv(voscir.diffdf, file = "completed-evals/voscir-diff.csv")
-write.csv(voscir.varimpdf, file = "completed-evals/voscir-varimport.csv")
-saveRDS(voscir.overlaplist, file = "voscir-overlaps.RData")
-saveRDS(voscir.idmlist, file = "voscir-idms.RData")
-
-voscir.overlapthresh <- vector(mode = "list", length = 100)
-voscir.idmthresh <- vector(mode = "list", length = 100)
-voscir.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = voscir.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (voscir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voscir.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voscir.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = voscir.idmlist[[i]]
   tstar.idm = (voscir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voscir.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voscir.idmthresh[[i]] = idm.thresh
@@ -4080,7 +4025,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   voscir.thresholddf = bind_rows(voscir.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(voscir.maxent@results[7:26,]),
+  #                       percent = voscir.maxent@results[7:26],
+  #                       permutation = voscir.maxent@results[27:46])
+  # 
+  # voscir.varimpdf = bind_rows(voscir.varimpdf, idm.vars)
 }
+
+write.csv(voscir.evaldf, file = "completed-evals/voscir-eval.csv")
+write.csv(voscir.thresholddf, file = "completed-evals/voscir-threshold.csv")
+# write.csv(voscir.varimpdf, file = "completed-evals/voscir-varimport.csv")
+save(voscir.overlaplist, file = "voscir-overlaps.RData")
+save(voscir.idmlist, file = "voscir-idms.RData")
 ```
 
 ```{r voscir ensemble}
@@ -4124,9 +4084,12 @@ voslup <- bbna %>%
 ```{r voslup maxent for loop, message = F}
 voslup.overlaplist <- vector(mode = "list", length = 100)
 voslup.idmlist <- vector(mode = "list", length = 100)
+voslup.overlapthresh <- vector(mode = "list", length = 100)
+voslup.idmthresh <- vector(mode = "list", length = 100)
 
 voslup.evaldf <- data.frame()
-voslup.varimpdf <- data.frame()
+voslup.thresholddf <- data.frame()
+# voslup.varimpdf <- data.frame()
 
 set.seed(122323)
 for(i in 1:100){
@@ -4210,8 +4173,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   voslup.idm.tstar <- which.max(voslup.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  voslup.idmnorm = (voslup.idm - minmax(voslup.idm)[1,])/(minmax(voslup.idm)[2,] - minmax(voslup.idm)[1,])
+  voslup.overlapnorm = (voslup.overlap - minmax(voslup.overlap)[1,])/(minmax(voslup.overlap)[2,] - minmax(voslup.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   voslup.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -4220,7 +4186,7 @@ for(i in 1:100){
                         tstar = voslup.overlap.tssdf[voslup.overlap.tstar, 1],
                         sens_star = voslup.overlap.tssdf[voslup.overlap.tstar, 4],
                         spec_star = voslup.overlap.tssdf[voslup.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(voslup.idm)), na.omit(values(voslup.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(voslup.idmnorm)), na.omit(values(voslup.overlapnorm)), na.rm = T))
 
   voslup.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -4232,42 +4198,19 @@ for(i in 1:100){
   
   voslup.evaldf = bind_rows(voslup.evaldf, voslup.overlap.eval, voslup.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(voslup.maxent@results[7:26,]),
-                        percent = voslup.maxent@results[7:26],
-                        permutation = voslup.maxent@results[27:46])
-  
-  voslup.varimpdf = bind_rows(voslup.varimpdf, idm.vars)
-}
-
-write.csv(voslup.evaldf, file = "completed-evals/voslup-eval.csv")
-write.csv(voslup.diffdf, file = "completed-evals/voslup-diff.csv")
-write.csv(voslup.varimpdf, file = "completed-evals/voslup-varimport.csv")
-saveRDS(voslup.overlaplist, file = "voslup-overlaps.RData")
-saveRDS(voslup.idmlist, file = "voslup-idms.RData")
-
-voslup.overlapthresh <- vector(mode = "list", length = 100)
-voslup.idmthresh <- vector(mode = "list", length = 100)
-voslup.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = voslup.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (voslup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voslup.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voslup.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = voslup.idmlist[[i]]
   tstar.idm = (voslup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voslup.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voslup.idmthresh[[i]] = idm.thresh
@@ -4284,7 +4227,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   voslup.thresholddf = bind_rows(voslup.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(voslup.maxent@results[7:26,]),
+  #                       percent = voslup.maxent@results[7:26],
+  #                       permutation = voslup.maxent@results[27:46])
+  # 
+  # voslup.varimpdf = bind_rows(voslup.varimpdf, idm.vars)
 }
+
+write.csv(voslup.evaldf, file = "completed-evals/voslup-eval.csv")
+write.csv(voslup.thresholddf, file = "completed-evals/voslup-threshold.csv")
+# write.csv(voslup.varimpdf, file = "completed-evals/voslup-varimport.csv")
+save(voslup.overlaplist, file = "voslup-overlaps.RData")
+save(voslup.idmlist, file = "voslup-idms.RData")
 ```
 
 ```{r voslup ensemble}
@@ -4569,9 +4527,12 @@ vospen <- bbna %>%
 ```{r vospen maxent for loop, message = F}
 vospen.overlaplist <- vector(mode = "list", length = 100)
 vospen.idmlist <- vector(mode = "list", length = 100)
+vospen.overlapthresh <- vector(mode = "list", length = 100)
+vospen.idmthresh <- vector(mode = "list", length = 100)
 
 vospen.evaldf <- data.frame()
-vospen.varimpdf <- data.frame()
+vospen.thresholddf <- data.frame()
+# vospen.varimpdf <- data.frame()
 
 set.seed(65784)
 for(i in 1:100){
@@ -4655,8 +4616,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   vospen.idm.tstar <- which.max(vospen.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  vospen.idmnorm = (vospen.idm - minmax(vospen.idm)[1,])/(minmax(vospen.idm)[2,] - minmax(vospen.idm)[1,])
+  vospen.overlapnorm = (vospen.overlap - minmax(vospen.overlap)[1,])/(minmax(vospen.overlap)[2,] - minmax(vospen.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   vospen.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -4665,7 +4629,7 @@ for(i in 1:100){
                         tstar = vospen.overlap.tssdf[vospen.overlap.tstar, 1],
                         sens_star = vospen.overlap.tssdf[vospen.overlap.tstar, 4],
                         spec_star = vospen.overlap.tssdf[vospen.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(vospen.idm)), na.omit(values(vospen.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(vospen.idmnorm)), na.omit(values(vospen.overlapnorm)), na.rm = T))
 
   vospen.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -4677,42 +4641,19 @@ for(i in 1:100){
   
   vospen.evaldf = bind_rows(vospen.evaldf, vospen.overlap.eval, vospen.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(vospen.maxent@results[7:26,]),
-                        percent = vospen.maxent@results[7:26],
-                        permutation = vospen.maxent@results[27:46])
-  
-  vospen.varimpdf = bind_rows(vospen.varimpdf, idm.vars)
-}
-
-write.csv(vospen.evaldf, file = "completed-evals/vospen-eval.csv")
-write.csv(vospen.diffdf, file = "completed-evals/vospen-diff.csv")
-write.csv(vospen.varimpdf, file = "completed-evals/vospen-varimport.csv")
-saveRDS(vospen.overlaplist, file = "vospen-overlaps.RData")
-saveRDS(vospen.idmlist, file = "vospen-idms.RData")
-
-vospen.overlapthresh <- vector(mode = "list", length = 100)
-vospen.idmthresh <- vector(mode = "list", length = 100)
-vospen.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = vospen.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (vospen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(vospen.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   vospen.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = vospen.idmlist[[i]]
   tstar.idm = (vospen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(vospen.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   vospen.idmthresh[[i]] = idm.thresh
@@ -4729,7 +4670,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   vospen.thresholddf = bind_rows(vospen.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(vospen.maxent@results[7:26,]),
+  #                       percent = vospen.maxent@results[7:26],
+  #                       permutation = vospen.maxent@results[27:46])
+  # 
+  # vospen.varimpdf = bind_rows(vospen.varimpdf, idm.vars)
 }
+
+write.csv(vospen.evaldf, file = "completed-evals/vospen-eval.csv")
+write.csv(vospen.thresholddf, file = "completed-evals/vospen-threshold.csv")
+# write.csv(vospen.varimpdf, file = "completed-evals/vospen-varimport.csv")
+save(vospen.overlaplist, file = "vospen-overlaps.RData")
+save(vospen.idmlist, file = "vospen-idms.RData")
 ```
 
 ```{r vospen ensemble}
@@ -4773,9 +4729,12 @@ vosrub <- bbna %>%
 ```{r vosrub maxent for loop, message = F}
 vosrub.overlaplist <- vector(mode = "list", length = 100)
 vosrub.idmlist <- vector(mode = "list", length = 100)
+vosrub.overlapthresh <- vector(mode = "list", length = 100)
+vosrub.idmthresh <- vector(mode = "list", length = 100)
 
 vosrub.evaldf <- data.frame()
-vosrub.varimpdf <- data.frame()
+vosrub.thresholddf <- data.frame()
+# vosrub.varimpdf <- data.frame()
 
 set.seed(11424)
 for(i in 1:100){
@@ -4859,8 +4818,11 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   vosrub.idm.tstar <- which.max(vosrub.idm.tssdf$TSS)
   
+  ## Step 4c: Normalize rasters for RMSE calculation
+  vosrub.idmnorm = (vosrub.idm - minmax(vosrub.idm)[1,])/(minmax(vosrub.idm)[2,] - minmax(vosrub.idm)[1,])
+  vosrub.overlapnorm = (vosrub.overlap - minmax(vosrub.overlap)[1,])/(minmax(vosrub.overlap)[2,] - minmax(vosrub.overlap)[1,])
   
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   vosrub.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -4869,7 +4831,7 @@ for(i in 1:100){
                         tstar = vosrub.overlap.tssdf[vosrub.overlap.tstar, 1],
                         sens_star = vosrub.overlap.tssdf[vosrub.overlap.tstar, 4],
                         spec_star = vosrub.overlap.tssdf[vosrub.overlap.tstar, 5],
-                        RMSE = predicts::RMSE(na.omit(values(vosrub.idm)), na.omit(values(vosrub.overlap)), na.rm = T))
+                        RMSE = predicts::RMSE(na.omit(values(vosrub.idmnorm)), na.omit(values(vosrub.overlapnorm)), na.rm = T))
 
   vosrub.idm.eval = data.frame(run = i,
                         model = "IDM",
@@ -4881,42 +4843,19 @@ for(i in 1:100){
   
   vosrub.evaldf = bind_rows(vosrub.evaldf, vosrub.overlap.eval, vosrub.idm.eval)
   
-    # Step 5: Save Variable Importance
-  idm.vars = data.frame(run = rep(i, 20),
-                        model = rep("IDM", 20),
-                        variable = names(vosrub.maxent@results[7:26,]),
-                        percent = vosrub.maxent@results[7:26],
-                        permutation = vosrub.maxent@results[27:46])
-  
-  vosrub.varimpdf = bind_rows(vosrub.varimpdf, idm.vars)
-}
-
-write.csv(vosrub.evaldf, file = "completed-evals/vosrub-eval.csv")
-write.csv(vosrub.diffdf, file = "completed-evals/vosrub-diff.csv")
-write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
-saveRDS(vosrub.overlaplist, file = "vosrub-overlaps.RData")
-saveRDS(vosrub.idmlist, file = "vosrub-idms.RData")
-
-vosrub.overlapthresh <- vector(mode = "list", length = 100)
-vosrub.idmthresh <- vector(mode = "list", length = 100)
-vosrub.thresholddf <- data.frame()
-
-for(i in 1:100){
-  overlap = vosrub.overlaplist[[i]]
+  # Step 5: Calculate threshold difference
   tstar.overlap = (vosrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(vosrub.overlap, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   vosrub.overlapthresh[[i]] = overlap.thresh
   
-  
-  idm = vosrub.idmlist[[i]]
   tstar.idm = (vosrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(vosrub.idm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   vosrub.idmthresh[[i]] = idm.thresh
@@ -4933,7 +4872,22 @@ for(i in 1:100){
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
   vosrub.thresholddf = bind_rows(vosrub.thresholddf, shared.df)
+  
+  #   # Step 5: Save Variable Importance
+  # idm.vars = data.frame(run = rep(i, 20),
+  #                       model = rep("IDM", 20),
+  #                       variable = names(vosrub.maxent@results[7:26,]),
+  #                       percent = vosrub.maxent@results[7:26],
+  #                       permutation = vosrub.maxent@results[27:46])
+  # 
+  # vosrub.varimpdf = bind_rows(vosrub.varimpdf, idm.vars)
 }
+
+write.csv(vosrub.evaldf, file = "completed-evals/vosrub-eval.csv")
+write.csv(vosrub.thresholddf, file = "completed-evals/vosrub-threshold.csv")
+# write.csv(vosrub.varimpdf, file = "completed-evals/vosrub-varimport.csv")
+save(vosrub.overlaplist, file = "vosrub-overlaps.RData")
+save(vosrub.idmlist, file = "vosrub-idms.RData")
 ```
 
 ```{r vosrub ensemble}
