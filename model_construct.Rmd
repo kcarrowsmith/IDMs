@@ -13,12 +13,11 @@ library(tidyverse)
 library(raster)
 library(geodata)
 library(ENMTools)
-# library(ggthemes)
-# library(viridis)
+library(ggthemes)
+library(viridis)
 library(predicts)
 library(rJava)
 library(modEvA)
-library(pROC)
 
 theme_set(theme_light() +
             theme(text = element_text(size = 20)))
@@ -96,7 +95,7 @@ bifcham <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r bifcham maxent for loop, message = F}
+```{r bifcham maxent for loop, message = F, eval = T, results = "hide"}
 bifcham.overlaplist <- vector(mode = "list", length = 100)
 bifcham.idmlist <- vector(mode = "list", length = 100)
 bifcham.overlapthresh <- vector(mode = "list", length = 100)
@@ -104,6 +103,7 @@ bifcham.idmthresh <- vector(mode = "list", length = 100)
 
 bifcham.thresholddf <- data.frame()
 bifcham.evaldf <- data.frame()
+bifcham.allthresh <- data.frame()
 # bifcham.varimpdf <- data.frame()
 
 set.seed(121023)
@@ -175,21 +175,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  bifcham.overlap.auc <- AUC(obs = bifcham.test, pred = bifcham.overlap)
-  bifcham.idm.auc <- AUC(obs = bifcham.test, pred = bifcham.idm)
+  ## Step 4a: Normalize rasters
+  bifcham.idmnorm = (bifcham.idm - minmax(bifcham.idm)[1,])/(minmax(bifcham.idm)[2,] - minmax(bifcham.idm)[1,])
+  bifcham.overlapnorm = (bifcham.overlap - minmax(bifcham.overlap)[1,])/(minmax(bifcham.overlap)[2,] - minmax(bifcham.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  bifcham.overlap.auc <- AUC(obs = bifcham.test, pred = bifcham.overlapnorm)
+  bifcham.idm.auc <- AUC(obs = bifcham.test, pred = bifcham.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   bifcham.overlap.tssdf <- bifcham.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifcham.overlap.tstar <- which.max(bifcham.overlap.tssdf$TSS)
   bifcham.idm.tssdf <- bifcham.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifcham.idm.tstar <- which.max(bifcham.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  bifcham.idmnorm = (bifcham.idm - minmax(bifcham.idm)[1,])/(minmax(bifcham.idm)[2,] - minmax(bifcham.idm)[1,])
-  bifcham.overlapnorm = (bifcham.overlap - minmax(bifcham.overlap)[1,])/(minmax(bifcham.overlap)[2,] - minmax(bifcham.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -213,10 +213,11 @@ for(i in 1:100){
   bifcham.evaldf = bind_rows(bifcham.evaldf, bifcham.overlap.eval, bifcham.idm.eval)
   
   # Step 5: Calculate threshold overlap
+  ## Step 5a: Threshold creations
   tstar.overlap = (bifcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(bifcham.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifcham.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifcham.overlapthresh[[i]] = overlap.thresh
@@ -224,7 +225,7 @@ for(i in 1:100){
   tstar.idm = (bifcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(bifcham.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifcham.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifcham.idmthresh[[i]] = idm.thresh
@@ -232,6 +233,7 @@ for(i in 1:100){
   shared = overlap.thresh + idm.thresh
   diff = idm.thresh - overlap.thresh
   
+  ## Step 5b: Threshold summary
   shared.df = data.frame(run = i,
                          n_shared = length(shared[shared == 2]),
                          n_IDM = length(diff[diff == 1]),
@@ -240,7 +242,8 @@ for(i in 1:100){
            prop.idm = n_IDM/(n_shared + n_IDM + n_overlap),
            prop.overlap = n_overlap/(n_shared + n_IDM + n_overlap))
   
-  bifcham.thresholddf = bind_rows(bifcham.thresholddf, shared.df)
+    bifcham.thresholddf = bind_rows(bifcham.thresholddf, shared.df)
+
   
   # # Step 5: Save Variable Importance
   # idm.vars = data.frame(run = rep(i, 20),
@@ -254,6 +257,7 @@ for(i in 1:100){
 
 write.csv(bifcham.evaldf, file = "completed-evals/bifcham-eval.csv")
 write.csv(bifcham.thresholddf, file = "completed-evals/bifcham-threshold.csv")
+write.csv(bifcham.allthresh, file = "completed-evals/bifcham-allthresh.csv")
 # write.csv(bifcham.varimpdf, file = "completed-evals/bifcham-varimport.csv")
 save(bifcham.overlaplist, file = "bifcham-overlaps.RData")
 save(bifcham.idmlist, file = "bifcham-idms.RData")
@@ -300,7 +304,7 @@ bifcir <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r bifcir maxent for loop, message = F}
+```{r bifcir maxent for loop, message = F, eval = T, results = "hide"}
 bifcir.overlaplist <- vector(mode = "list", length = 100)
 bifcir.idmlist <- vector(mode = "list", length = 100)
 bifcir.overlapthresh <- vector(mode = "list", length = 100)
@@ -380,22 +384,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  bifcir.overlap.auc <- AUC(obs = bifcir.test, pred = bifcir.overlap)
-  bifcir.idm.auc <- AUC(obs = bifcir.test, pred = bifcir.idm)
+    ## Step 4a: Normalize rasters
+  bifcir.idmnorm = (bifcir.idm - minmax(bifcir.idm)[1,])/(minmax(bifcir.idm)[2,] - minmax(bifcir.idm)[1,])
+  bifcir.overlapnorm = (bifcir.overlap - minmax(bifcir.overlap)[1,])/(minmax(bifcir.overlap)[2,] - minmax(bifcir.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  bifcir.overlap.auc <- AUC(obs = bifcir.test, pred = bifcir.overlapnorm)
+  bifcir.idm.auc <- AUC(obs = bifcir.test, pred = bifcir.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   bifcir.overlap.tssdf <- bifcir.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifcir.overlap.tstar <- which.max(bifcir.overlap.tssdf$TSS)
   bifcir.idm.tssdf <- bifcir.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifcir.idm.tstar <- which.max(bifcir.idm.tssdf$TSS)
-  
-    ## Step 4c: Normalize rasters for RMSE calculation
-  bifcir.idmnorm = (bifcir.idm - minmax(bifcir.idm)[1,])/(minmax(bifcir.idm)[2,] - minmax(bifcir.idm)[1,])
-  bifcir.overlapnorm = (bifcir.overlap - minmax(bifcir.overlap)[1,])/(minmax(bifcir.overlap)[2,] - minmax(bifcir.overlap)[1,])
-  
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -422,7 +425,7 @@ for(i in 1:100){
   tstar.overlap = (bifcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(bifcir.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifcir.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifcir.overlapthresh[[i]] = overlap.thresh
@@ -430,7 +433,7 @@ for(i in 1:100){
   tstar.idm = (bifcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(bifcir.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifcir.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifcir.idmthresh[[i]] = idm.thresh
@@ -508,7 +511,7 @@ biflup <- bbna %>%
 
 Here we have a for-loop running MaxEnt models 100 times. For each run, we will select new training and test data, calculate overlaps, and calculate an IDM. We then save the evaluation metrics (AUC, TSS) in a dataframe to assess the performance of the different methods.
 
-```{r biflup maxent for loop, message = F}
+```{r biflup maxent for loop, message = F, eval = T, results = "hide"}
 biflup.overlaplist <- vector(mode = "list", length = 100)
 biflup.idmlist <- vector(mode = "list", length = 100)
 biflup.overlapthresh <- vector(mode = "list", length = 100)
@@ -598,9 +601,13 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
+  ## Step 4a: Normalize rasters
+  biflup.idmnorm = (biflup.idm - minmax(biflup.idm)[1,])/(minmax(biflup.idm)[2,] - minmax(biflup.idm)[1,])
+  biflup.overlapnorm = (biflup.overlap - minmax(biflup.overlap)[1,])/(minmax(biflup.overlap)[2,] - minmax(biflup.overlap)[1,])
+  
   ## Step 4a: Use modEvA::AUC to get AUC
-  biflup.overlap.auc <- AUC(obs = biflup.test, pred = biflup.overlap)
-  biflup.idm.auc <- AUC(obs = biflup.test, pred = biflup.idm)
+  biflup.overlap.auc <- AUC(obs = biflup.test, pred = biflup.overlapnorm)
+  biflup.idm.auc <- AUC(obs = biflup.test, pred = biflup.idmnorm)
   
   ## Step 4b: Calculate TSS and tstar
   biflup.overlap.tssdf <- biflup.overlap.auc$thresholds %>%
@@ -609,10 +616,6 @@ for(i in 1:100){
   biflup.idm.tssdf <- biflup.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   biflup.idm.tstar <- which.max(biflup.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  biflup.idmnorm = (biflup.idm - minmax(biflup.idm)[1,])/(minmax(biflup.idm)[2,] - minmax(biflup.idm)[1,])
-  biflup.overlapnorm = (biflup.overlap - minmax(biflup.overlap)[1,])/(minmax(biflup.overlap)[2,] - minmax(biflup.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -639,7 +642,7 @@ for(i in 1:100){
   tstar.overlap = (biflup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(biflup.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(biflup.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   biflup.overlapthresh[[i]] = overlap.thresh
@@ -647,7 +650,7 @@ for(i in 1:100){
   tstar.idm = (biflup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(biflup.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(biflup.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   biflup.idmthresh[[i]] = idm.thresh
@@ -708,281 +711,6 @@ biflup.idm.plot <- ggplot() +
 ggsave("figures/biflup-idm.png", biflup.idm.plot, width = 6, height = 4, units = "in")
 ```
 
-<!-- ### L. polyphyllus -->
-
-<!-- Here, we're looking at whether things change if we assume that all of the *Lupinus* records are one species. This allows us to use a species-specific plant distribution, but is probably not true on the interaction level. -->
-
-<!-- I'm not re-making the IDM because it should be the same. If we include this in the final paper, we probably should just so that the same background points get selected. -->
-
-<!-- ```{r bifarius X lupinus polyphyllus} -->
-<!-- gbif.luppoly <- gbif %>% -->
-<!--   filter(species == "Lupinus polyphyllus") -->
-
-<!-- bifluppoly.evaldf <- data.frame() -->
-
-<!-- bifluppoly.varimpdf <- data.frame() -->
-
-<!-- set.seed(41924) -->
-
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   bif.longlat <- bbna %>% -->
-<!--     filter(species == "bifarius", -->
-<!--            plant.host.genus != "Lupinus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   bif.fold <- kfold(bif.longlat, k = 5) -->
-<!--   bif.test <- bif.longlat[bif.fold == 1,] -->
-<!--   bif.train <- bif.longlat[bif.fold != 1,] -->
-
-<!--   luppoly.longlat <- gbif.luppoly %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   luppoly.fold <- kfold(luppoly.longlat, k = 5) -->
-<!--   luppoly.test <- luppoly.longlat[luppoly.fold == 1,] -->
-<!--   luppoly.train <- luppoly.longlat[luppoly.fold != 1,] -->
-
-<!--   bifluppoly.longlat <- biflup %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   bifluppoly.fold <- kfold(bifluppoly.longlat, k = 5) -->
-<!--   bifluppoly.test <- bifluppoly.longlat[bifluppoly.fold == 1,] -->
-<!--   bifluppoly.train <- bifluppoly.longlat[bifluppoly.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   bif.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = bif.train,  -->
-<!--                        a = bg.train) -->
-<!--   bif.predict <- dismo::predict(bif.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   luppoly.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = luppoly.train,  -->
-<!--                        a = bg.train) -->
-<!--   luppoly.predict <- dismo::predict(luppoly.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   bif.by.luppoly <- maxent(x = stack(stack(bioclim), luppoly.predict), -->
-<!--                        p = bif.train, -->
-<!--                        a = bg.train) -->
-<!--   luppoly.by.bif <- maxent(x = stack(stack(bioclim), bif.predict), -->
-<!--                        p = luppoly.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   bifbyluppoly.eval <- dismo::evaluate(p = biflup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = bif.by.luppoly, -->
-<!--                                    x = stack(stack(bioclim), luppoly.predict)) -->
-<!--   luppolybybif.eval <- dismo::evaluate(p = biflup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = luppoly.by.bif, -->
-<!--                                    x = stack(stack(bioclim), bif.predict)) -->
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   bblpoly.eval = data.frame(run = i, -->
-<!--                         model = "bblpoly", -->
-<!--                         AUC = bifbyluppoly.eval@auc, -->
-<!--                         cor = bifbyluppoly.eval@cor, -->
-<!--                         TSS = max(bifbyluppoly.eval@TPR - bifbyluppoly.eval@FPR), -->
-<!--                         tstar = which.max(bifbyluppoly.eval@TPR - bifbyluppoly.eval@FPR)) -->
-
-<!--   lpolybb.eval = data.frame(run = i, -->
-<!--                         model = "lpolybb", -->
-<!--                         AUC = luppolybybif.eval@auc, -->
-<!--                         cor = luppolybybif.eval@cor, -->
-<!--                         TSS = max(luppolybybif.eval@TPR - luppolybybif.eval@FPR), -->
-<!--                         tstar = which.max(luppolybybif.eval@TPR - luppolybybif.eval@FPR)) -->
-
-
-
-<!--   bifluppoly.evaldf = bind_rows(bifluppoly.evaldf, bblpoly.eval, lpolybb.eval) -->
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   bblpoly.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("bblpoly", 21), -->
-<!--                         variable = names(bif.by.luppoly@results[7:27,]), -->
-<!--                         percent = bif.by.luppoly@results[7:27], -->
-<!--                         permutation = bif.by.luppoly@results[28:48]) -->
-
-<!--   lpolybb.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("lpolybb", 21), -->
-<!--                         variable = names(luppoly.by.bif@results[7:27,]), -->
-<!--                         percent = luppoly.by.bif@results[7:27], -->
-<!--                         permutation = luppoly.by.bif@results[28:48]) -->
-
-<!--   bifluppoly.varimpdf = bind_rows(bifluppoly.varimpdf, bblpoly.vars, lpolybb.vars) -->
-<!-- } -->
-<!-- ``` -->
-
-<!-- ### L. bicolor -->
-
-<!-- ```{r bifarius X lupinus bicolor} -->
-<!-- gbif.lupbicolor <- gbif %>% -->
-<!--   filter(species == "Lupinus bicolor") -->
-
-<!-- biflupbicolor.evaldf <- data.frame() -->
-
-<!-- biflupbicolor.varimpdf <- data.frame() -->
-
-<!-- set.seed(2024422) -->
-
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   bif.longlat <- bbna %>% -->
-<!--     filter(species == "bifarius", -->
-<!--            plant.host.genus != "Lupinus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   bif.fold <- kfold(bif.longlat, k = 5) -->
-<!--   bif.test <- bif.longlat[bif.fold == 1,] -->
-<!--   bif.train <- bif.longlat[bif.fold != 1,] -->
-
-<!--   lupbicolor.longlat <- gbif.lupbicolor %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   lupbicolor.fold <- kfold(lupbicolor.longlat, k = 5) -->
-<!--   lupbicolor.test <- lupbicolor.longlat[lupbicolor.fold == 1,] -->
-<!--   lupbicolor.train <- lupbicolor.longlat[lupbicolor.fold != 1,] -->
-
-<!--   biflup.longlat <- biflup %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   biflup.fold <- kfold(biflup.longlat, k = 5) -->
-<!--   biflup.test <- biflup.longlat[biflup.fold == 1,] -->
-<!--   biflup.train <- biflup.longlat[biflup.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   bif.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = bif.train,  -->
-<!--                        a = bg.train) -->
-<!--   bif.predict <- dismo::predict(bif.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   lupbicolor.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = lupbicolor.train,  -->
-<!--                        a = bg.train) -->
-<!--   lupbicolor.predict <- dismo::predict(lupbicolor.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   bif.by.lupbicolor <- maxent(x = stack(stack(bioclim), lupbicolor.predict), -->
-<!--                        p = bif.train, -->
-<!--                        a = bg.train) -->
-<!--   lupbicolor.by.bif <- maxent(x = stack(stack(bioclim), bif.predict), -->
-<!--                        p = lupbicolor.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   bifbylupbicolor.eval <- dismo::evaluate(p = biflup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = bif.by.lupbicolor, -->
-<!--                                    x = stack(stack(bioclim), lupbicolor.predict)) -->
-<!--   lupbicolorbybif.eval <- dismo::evaluate(p = biflup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = lupbicolor.by.bif, -->
-<!--                                    x = stack(stack(bioclim), bif.predict)) -->
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   bblbicolor.eval = data.frame(run = i, -->
-<!--                         model = "bblbicolor", -->
-<!--                         AUC = bifbylupbicolor.eval@auc, -->
-<!--                         cor = bifbylupbicolor.eval@cor, -->
-<!--                         TSS = max(bifbylupbicolor.eval@TPR - bifbylupbicolor.eval@FPR), -->
-<!--                         tstar = which.max(bifbylupbicolor.eval@TPR - bifbylupbicolor.eval@FPR)) -->
-
-<!--   lbicolorbb.eval = data.frame(run = i, -->
-<!--                         model = "lbicolorbb", -->
-<!--                         AUC = lupbicolorbybif.eval@auc, -->
-<!--                         cor = lupbicolorbybif.eval@cor, -->
-<!--                         TSS = max(lupbicolorbybif.eval@TPR - lupbicolorbybif.eval@FPR), -->
-<!--                         tstar = which.max(lupbicolorbybif.eval@TPR - lupbicolorbybif.eval@FPR)) -->
-
-
-
-<!--   biflupbicolor.evaldf = bind_rows(biflupbicolor.evaldf, bblbicolor.eval, lbicolorbb.eval) -->
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   bblbicolor.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("bblbicolor", 21), -->
-<!--                         variable = names(bif.by.lupbicolor@results[7:27,]), -->
-<!--                         percent = bif.by.lupbicolor@results[7:27], -->
-<!--                         permutation = bif.by.lupbicolor@results[28:48]) -->
-
-<!--   lbicolorbb.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("lbicolorbb", 21), -->
-<!--                         variable = names(lupbicolor.by.bif@results[7:27,]), -->
-<!--                         percent = lupbicolor.by.bif@results[7:27], -->
-<!--                         permutation = lupbicolor.by.bif@results[28:48]) -->
-
-<!--   biflupbicolor.varimpdf = bind_rows(biflupbicolor.varimpdf, bblbicolor.vars, lbicolorbb.vars) -->
-<!-- } -->
-<!-- ``` -->
-
-
-<!-- And let's look at some variable importance. -->
-
-<!-- ```{r biflup variable importance} -->
-<!-- var.idm <- ggplot(biflup.varimpdf %>% filter(model == "IDM"), aes(x = variable, y = percent)) + -->
-<!--   geom_boxplot() + -->
-<!--   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) -->
-<!-- var.idm -->
-<!-- # 8, 14, 19, 6, 12 -->
-
-<!-- var.bbl <- ggplot(biflup.varimpdf %>% filter(model == "bbl"), aes(x = variable, y = percent)) + -->
-<!--   geom_boxplot() + -->
-<!--   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) -->
-<!-- var.bbl -->
-<!-- # 17, lupinus 12, 11 -->
-
-<!-- var.lbb <- ggplot(biflup.varimpdf %>% filter(model == "lbb"), aes(x = variable, y = percent)) + -->
-<!--   geom_boxplot() + -->
-<!--   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) -->
-<!-- var.lbb -->
-<!-- # 19, bifarius, elevation, 18 -->
-<!-- ``` -->
-
-<!-- I don't really know what to do with these yet. I think I'll probably run some statistics to confirm that they're statistically different between methods and then plot them out. -->
-
 ## Penstemon
 
 ```{r bif pen data, message = F}
@@ -995,7 +723,7 @@ bifpen <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r bifpen maxent for loop, message = F}
+```{r bifpen maxent for loop, message = F, eval = T, results = "hide"}
 bifpen.overlaplist <- vector(mode = "list", length = 100)
 bifpen.idmlist <- vector(mode = "list", length = 100)
 bifpen.overlapthresh <- vector(mode = "list", length = 100)
@@ -1075,21 +803,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  bifpen.overlap.auc <- AUC(obs = bifpen.test, pred = bifpen.overlap)
-  bifpen.idm.auc <- AUC(obs = bifpen.test, pred = bifpen.idm)
+  ## Step 4a: Normalize rasters
+  bifpen.idmnorm = (bifpen.idm - minmax(bifpen.idm)[1,])/(minmax(bifpen.idm)[2,] - minmax(bifpen.idm)[1,])
+  bifpen.overlapnorm = (bifpen.overlap - minmax(bifpen.overlap)[1,])/(minmax(bifpen.overlap)[2,] - minmax(bifpen.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  bifpen.overlap.auc <- AUC(obs = bifpen.test, pred = bifpen.overlapnorm)
+  bifpen.idm.auc <- AUC(obs = bifpen.test, pred = bifpen.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   bifpen.overlap.tssdf <- bifpen.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifpen.overlap.tstar <- which.max(bifpen.overlap.tssdf$TSS)
   bifpen.idm.tssdf <- bifpen.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifpen.idm.tstar <- which.max(bifpen.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  bifpen.idmnorm = (bifpen.idm - minmax(bifpen.idm)[1,])/(minmax(bifpen.idm)[2,] - minmax(bifpen.idm)[1,])
-  bifpen.overlapnorm = (bifpen.overlap - minmax(bifpen.overlap)[1,])/(minmax(bifpen.overlap)[2,] - minmax(bifpen.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -1116,7 +844,7 @@ for(i in 1:100){
   tstar.overlap = (bifpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(bifpen.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifpen.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifpen.overlapthresh[[i]] = overlap.thresh
@@ -1124,7 +852,7 @@ for(i in 1:100){
   tstar.idm = (bifpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(bifpen.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifpen.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifpen.idmthresh[[i]] = idm.thresh
@@ -1196,7 +924,7 @@ bifrub <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r bifrub maxent for loop, message = F}
+```{r bifrub maxent for loop, message = F, eval = T, results = "hide"}
 bifrub.overlaplist <- vector(mode = "list", length = 100)
 bifrub.idmlist <- vector(mode = "list", length = 100)
 bifrub.overlapthresh <- vector(mode = "list", length = 100)
@@ -1276,21 +1004,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  bifrub.overlap.auc <- AUC(obs = bifrub.test, pred = bifrub.overlap)
-  bifrub.idm.auc <- AUC(obs = bifrub.test, pred = bifrub.idm)
+  ## Step 4a: Normalize rasters
+  bifrub.idmnorm = (bifrub.idm - minmax(bifrub.idm)[1,])/(minmax(bifrub.idm)[2,] - minmax(bifrub.idm)[1,])
+  bifrub.overlapnorm = (bifrub.overlap - minmax(bifrub.overlap)[1,])/(minmax(bifrub.overlap)[2,] - minmax(bifrub.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  bifrub.overlap.auc <- AUC(obs = bifrub.test, pred = bifrub.overlapnorm)
+  bifrub.idm.auc <- AUC(obs = bifrub.test, pred = bifrub.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   bifrub.overlap.tssdf <- bifrub.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifrub.overlap.tstar <- which.max(bifrub.overlap.tssdf$TSS)
   bifrub.idm.tssdf <- bifrub.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   bifrub.idm.tstar <- which.max(bifrub.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  bifrub.idmnorm = (bifrub.idm - minmax(bifrub.idm)[1,])/(minmax(bifrub.idm)[2,] - minmax(bifrub.idm)[1,])
-  bifrub.overlapnorm = (bifrub.overlap - minmax(bifrub.overlap)[1,])/(minmax(bifrub.overlap)[2,] - minmax(bifrub.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -1317,7 +1045,7 @@ for(i in 1:100){
   tstar.overlap = (bifrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(bifrub.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(bifrub.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   bifrub.overlapthresh[[i]] = overlap.thresh
@@ -1325,7 +1053,7 @@ for(i in 1:100){
   tstar.idm = (bifrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(bifrub.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(bifrub.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   bifrub.idmthresh[[i]] = idm.thresh
@@ -1398,7 +1126,7 @@ flavcham <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r flavcham maxent for loop, message = F}
+```{r flavcham maxent for loop, message = F, eval = T, results = "hide"}
 flavcham.overlaplist <- vector(mode = "list", length = 100)
 flavcham.idmlist <- vector(mode = "list", length = 100)
 flavcham.overlapthresh <- vector(mode = "list", length = 100)
@@ -1478,21 +1206,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  flavcham.overlap.auc <- AUC(obs = flavcham.test, pred = flavcham.overlap)
-  flavcham.idm.auc <- AUC(obs = flavcham.test, pred = flavcham.idm)
+  ## Step 4a: Normalize rasters
+  flavcham.idmnorm = (flavcham.idm - minmax(flavcham.idm)[1,])/(minmax(flavcham.idm)[2,] - minmax(flavcham.idm)[1,])
+  flavcham.overlapnorm = (flavcham.overlap - minmax(flavcham.overlap)[1,])/(minmax(flavcham.overlap)[2,] - minmax(flavcham.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  flavcham.overlap.auc <- AUC(obs = flavcham.test, pred = flavcham.overlapnorm)
+  flavcham.idm.auc <- AUC(obs = flavcham.test, pred = flavcham.idmnorm)
+  
+  ## Step 4v: Calculate TSS and tstar
   flavcham.overlap.tssdf <- flavcham.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavcham.overlap.tstar <- which.max(flavcham.overlap.tssdf$TSS)
   flavcham.idm.tssdf <- flavcham.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavcham.idm.tstar <- which.max(flavcham.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  flavcham.idmnorm = (flavcham.idm - minmax(flavcham.idm)[1,])/(minmax(flavcham.idm)[2,] - minmax(flavcham.idm)[1,])
-  flavcham.overlapnorm = (flavcham.overlap - minmax(flavcham.overlap)[1,])/(minmax(flavcham.overlap)[2,] - minmax(flavcham.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -1519,7 +1247,7 @@ for(i in 1:100){
   tstar.overlap = (flavcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(flavcham.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavcham.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavcham.overlapthresh[[i]] = overlap.thresh
@@ -1527,7 +1255,7 @@ for(i in 1:100){
   tstar.idm = (flavcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(flavcham.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavcham.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavcham.idmthresh[[i]] = idm.thresh
@@ -1599,7 +1327,7 @@ flavcir <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r flavcir maxent for loop, message = F}
+```{r flavcir maxent for loop, message = F, eval = T, results = "hide"}
 flavcir.overlaplist <- vector(mode = "list", length = 100)
 flavcir.idmlist <- vector(mode = "list", length = 100)
 flavcir.overlapthresh <- vector(mode = "list", length = 100)
@@ -1679,21 +1407,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  flavcir.overlap.auc <- AUC(obs = flavcir.test, pred = flavcir.overlap)
-  flavcir.idm.auc <- AUC(obs = flavcir.test, pred = flavcir.idm)
+  ## Step 4a: Normalize rasters
+  flavcir.idmnorm = (flavcir.idm - minmax(flavcir.idm)[1,])/(minmax(flavcir.idm)[2,] - minmax(flavcir.idm)[1,])
+  flavcir.overlapnorm = (flavcir.overlap - minmax(flavcir.overlap)[1,])/(minmax(flavcir.overlap)[2,] - minmax(flavcir.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  flavcir.overlap.auc <- AUC(obs = flavcir.test, pred = flavcir.overlapnorm)
+  flavcir.idm.auc <- AUC(obs = flavcir.test, pred = flavcir.idmnorm)
+  
+  ## Step 4v: Calculate TSS and tstar
   flavcir.overlap.tssdf <- flavcir.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavcir.overlap.tstar <- which.max(flavcir.overlap.tssdf$TSS)
   flavcir.idm.tssdf <- flavcir.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavcir.idm.tstar <- which.max(flavcir.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  flavcir.idmnorm = (flavcir.idm - minmax(flavcir.idm)[1,])/(minmax(flavcir.idm)[2,] - minmax(flavcir.idm)[1,])
-  flavcir.overlapnorm = (flavcir.overlap - minmax(flavcir.overlap)[1,])/(minmax(flavcir.overlap)[2,] - minmax(flavcir.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -1720,7 +1448,7 @@ for(i in 1:100){
   tstar.overlap = (flavcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(flavcir.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavcir.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavcir.overlapthresh[[i]] = overlap.thresh
@@ -1728,7 +1456,7 @@ for(i in 1:100){
   tstar.idm = (flavcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(flavcir.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavcir.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavcir.idmthresh[[i]] = idm.thresh
@@ -1801,7 +1529,7 @@ flavlup <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r flavlup maxent for loop, message = F}
+```{r flavlup maxent for loop, message = F, eval = T, results = "hide"}
 flavlup.overlaplist <- vector(mode = "list", length = 100)
 flavlup.idmlist <- vector(mode = "list", length = 100)
 flavlup.overlapthresh <- vector(mode = "list", length = 100)
@@ -1881,21 +1609,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  flavlup.overlap.auc <- AUC(obs = flavlup.test, pred = flavlup.overlap)
-  flavlup.idm.auc <- AUC(obs = flavlup.test, pred = flavlup.idm)
+  ## Step 4a: Normalize rasters
+  flavlup.idmnorm = (flavlup.idm - minmax(flavlup.idm)[1,])/(minmax(flavlup.idm)[2,] - minmax(flavlup.idm)[1,])
+  flavlup.overlapnorm = (flavlup.overlap - minmax(flavlup.overlap)[1,])/(minmax(flavlup.overlap)[2,] - minmax(flavlup.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+    ## Step 4b: Use modEvA::AUC to get AUC
+  flavlup.overlap.auc <- AUC(obs = flavlup.test, pred = flavlup.overlapnorm)
+  flavlup.idm.auc <- AUC(obs = flavlup.test, pred = flavlup.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   flavlup.overlap.tssdf <- flavlup.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavlup.overlap.tstar <- which.max(flavlup.overlap.tssdf$TSS)
   flavlup.idm.tssdf <- flavlup.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavlup.idm.tstar <- which.max(flavlup.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  flavlup.idmnorm = (flavlup.idm - minmax(flavlup.idm)[1,])/(minmax(flavlup.idm)[2,] - minmax(flavlup.idm)[1,])
-  flavlup.overlapnorm = (flavlup.overlap - minmax(flavlup.overlap)[1,])/(minmax(flavlup.overlap)[2,] - minmax(flavlup.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -1922,7 +1650,7 @@ for(i in 1:100){
   tstar.overlap = (flavlup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(flavlup.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavlup.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavlup.overlapthresh[[i]] = overlap.thresh
@@ -1930,7 +1658,7 @@ for(i in 1:100){
   tstar.idm = (flavlup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(flavlup.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavlup.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavlup.idmthresh[[i]] = idm.thresh
@@ -2002,7 +1730,7 @@ flavpen <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r flavpen maxent for loop, message = F}
+```{r flavpen maxent for loop, message = F, eval = T, results = "hide"}
 flavpen.overlaplist <- vector(mode = "list", length = 100)
 flavpen.idmlist <- vector(mode = "list", length = 100)
 flavpen.overlapthresh <- vector(mode = "list", length = 100)
@@ -2082,21 +1810,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  flavpen.overlap.auc <- AUC(obs = flavpen.test, pred = flavpen.overlap)
-  flavpen.idm.auc <- AUC(obs = flavpen.test, pred = flavpen.idm)
+  ## Step 4a: Normalize rasters for RMSE calculation
+  flavpen.idmnorm = (flavpen.idm - minmax(flavpen.idm)[1,])/(minmax(flavpen.idm)[2,] - minmax(flavpen.idm)[1,])
+  flavpen.overlapnorm = (flavpen.overlap - minmax(flavpen.overlap)[1,])/(minmax(flavpen.overlap)[2,] - minmax(flavpen.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  flavpen.overlap.auc <- AUC(obs = flavpen.test, pred = flavpen.overlapnorm)
+  flavpen.idm.auc <- AUC(obs = flavpen.test, pred = flavpen.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   flavpen.overlap.tssdf <- flavpen.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavpen.overlap.tstar <- which.max(flavpen.overlap.tssdf$TSS)
   flavpen.idm.tssdf <- flavpen.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavpen.idm.tstar <- which.max(flavpen.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  flavpen.idmnorm = (flavpen.idm - minmax(flavpen.idm)[1,])/(minmax(flavpen.idm)[2,] - minmax(flavpen.idm)[1,])
-  flavpen.overlapnorm = (flavpen.overlap - minmax(flavpen.overlap)[1,])/(minmax(flavpen.overlap)[2,] - minmax(flavpen.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -2123,7 +1851,7 @@ for(i in 1:100){
   tstar.overlap = (flavpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(flavpen.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavpen.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavpen.overlapthresh[[i]] = overlap.thresh
@@ -2131,7 +1859,7 @@ for(i in 1:100){
   tstar.idm = (flavpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(flavpen.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavpen.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavpen.idmthresh[[i]] = idm.thresh
@@ -2283,21 +2011,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  flavrub.overlap.auc <- AUC(obs = flavrub.test, pred = flavrub.overlap)
-  flavrub.idm.auc <- AUC(obs = flavrub.test, pred = flavrub.idm)
+  ## Step 4a: Normalize rasters
+  flavrub.idmnorm = (flavrub.idm - minmax(flavrub.idm)[1,])/(minmax(flavrub.idm)[2,] - minmax(flavrub.idm)[1,])
+  flavrub.overlapnorm = (flavrub.overlap - minmax(flavrub.overlap)[1,])/(minmax(flavrub.overlap)[2,] - minmax(flavrub.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  flavrub.overlap.auc <- AUC(obs = flavrub.test, pred = flavrub.overlapnorm)
+  flavrub.idm.auc <- AUC(obs = flavrub.test, pred = flavrub.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   flavrub.overlap.tssdf <- flavrub.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavrub.overlap.tstar <- which.max(flavrub.overlap.tssdf$TSS)
   flavrub.idm.tssdf <- flavrub.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   flavrub.idm.tstar <- which.max(flavrub.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  flavrub.idmnorm = (flavrub.idm - minmax(flavrub.idm)[1,])/(minmax(flavrub.idm)[2,] - minmax(flavrub.idm)[1,])
-  flavrub.overlapnorm = (flavrub.overlap - minmax(flavrub.overlap)[1,])/(minmax(flavrub.overlap)[2,] - minmax(flavrub.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -2324,7 +2052,7 @@ for(i in 1:100){
   tstar.overlap = (flavrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(flavrub.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(flavrub.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   flavrub.overlapthresh[[i]] = overlap.thresh
@@ -2332,7 +2060,7 @@ for(i in 1:100){
   tstar.idm = (flavrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(flavrub.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(flavrub.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   flavrub.idmthresh[[i]] = idm.thresh
@@ -2486,11 +2214,15 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  mixcham.overlap.auc <- AUC(obs = mixcham.test, pred = mixcham.overlap)
-  mixcham.idm.auc <- AUC(obs = mixcham.test, pred = mixcham.idm)
+  ## Step 4a: Normalize rasters
+  mixcham.idmnorm = (mixcham.idm - minmax(mixcham.idm)[1,])/(minmax(mixcham.idm)[2,] - minmax(mixcham.idm)[1,])
+  mixcham.overlapnorm = (mixcham.overlap - minmax(mixcham.overlap)[1,])/(minmax(mixcham.overlap)[2,] - minmax(mixcham.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  mixcham.overlap.auc <- AUC(obs = mixcham.test, pred = mixcham.overlapnorm)
+  mixcham.idm.auc <- AUC(obs = mixcham.test, pred = mixcham.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   mixcham.overlap.tssdf <- mixcham.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixcham.overlap.tstar <- which.max(mixcham.overlap.tssdf$TSS)
@@ -2498,11 +2230,7 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixcham.idm.tstar <- which.max(mixcham.idm.tssdf$TSS)
   
-  ## Step 4c: Normalize rasters for RMSE calculation
-  mixcham.idmnorm = (mixcham.idm - minmax(mixcham.idm)[1,])/(minmax(mixcham.idm)[2,] - minmax(mixcham.idm)[1,])
-  mixcham.overlapnorm = (mixcham.overlap - minmax(mixcham.overlap)[1,])/(minmax(mixcham.overlap)[2,] - minmax(mixcham.overlap)[1,])
-  
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   mixcham.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -2527,7 +2255,7 @@ for(i in 1:100){
   tstar.overlap = (mixcham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(mixcham.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixcham.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixcham.overlapthresh[[i]] = overlap.thresh
@@ -2535,7 +2263,7 @@ for(i in 1:100){
   tstar.idm = (mixcham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(mixcham.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixcham.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixcham.idmthresh[[i]] = idm.thresh
@@ -2608,7 +2336,7 @@ mixcir <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r mixcir maxent for loop, message = F}
+```{r mixcir maxent for loop, message = F, eval = T, results = "hide"}
 mixcir.overlaplist <- vector(mode = "list", length = 100)
 mixcir.idmlist <- vector(mode = "list", length = 100)
 mixcir.overlapthresh <- vector(mode = "list", length = 100)
@@ -2688,11 +2416,15 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  mixcir.overlap.auc <- AUC(obs = mixcir.test, pred = mixcir.overlap)
-  mixcir.idm.auc <- AUC(obs = mixcir.test, pred = mixcir.idm)
+  ## Step 4a: Normalize rasters
+  mixcir.idmnorm = (mixcir.idm - minmax(mixcir.idm)[1,])/(minmax(mixcir.idm)[2,] - minmax(mixcir.idm)[1,])
+  mixcir.overlapnorm = (mixcir.overlap - minmax(mixcir.overlap)[1,])/(minmax(mixcir.overlap)[2,] - minmax(mixcir.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  mixcir.overlap.auc <- AUC(obs = mixcir.test, pred = mixcir.overlapnorm)
+  mixcir.idm.auc <- AUC(obs = mixcir.test, pred = mixcir.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   mixcir.overlap.tssdf <- mixcir.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixcir.overlap.tstar <- which.max(mixcir.overlap.tssdf$TSS)
@@ -2700,11 +2432,7 @@ for(i in 1:100){
     mutate(TSS = sensitivity + specificity - 1)
   mixcir.idm.tstar <- which.max(mixcir.idm.tssdf$TSS)
   
-  ## Step 4c: Normalize rasters for RMSE calculation
-  mixcir.idmnorm = (mixcir.idm - minmax(mixcir.idm)[1,])/(minmax(mixcir.idm)[2,] - minmax(mixcir.idm)[1,])
-  mixcir.overlapnorm = (mixcir.overlap - minmax(mixcir.overlap)[1,])/(minmax(mixcir.overlap)[2,] - minmax(mixcir.overlap)[1,])
-  
-  ## Step 4b: Save evaluation scores
+  ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
   mixcir.overlap.eval = data.frame(run = i,
                         model = "overlap",
@@ -2729,7 +2457,7 @@ for(i in 1:100){
   tstar.overlap = (mixcir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(mixcir.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixcir.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixcir.overlapthresh[[i]] = overlap.thresh
@@ -2737,7 +2465,7 @@ for(i in 1:100){
   tstar.idm = (mixcir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(mixcir.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixcir.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixcir.idmthresh[[i]] = idm.thresh
@@ -2811,7 +2539,7 @@ mixlup <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r mixlup maxent for loop, message = F}
+```{r mixlup maxent for loop, message = F, eval = T, results = "hide"}
 mixlup.overlaplist <- vector(mode = "list", length = 100)
 mixlup.idmlist <- vector(mode = "list", length = 100)
 mixlup.overlapthresh <- vector(mode = "list", length = 100)
@@ -2891,21 +2619,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  mixlup.overlap.auc <- AUC(obs = mixlup.test, pred = mixlup.overlap)
-  mixlup.idm.auc <- AUC(obs = mixlup.test, pred = mixlup.idm)
+  ## Step 4a: Normalize rasters
+  mixlup.idmnorm = (mixlup.idm - minmax(mixlup.idm)[1,])/(minmax(mixlup.idm)[2,] - minmax(mixlup.idm)[1,])
+  mixlup.overlapnorm = (mixlup.overlap - minmax(mixlup.overlap)[1,])/(minmax(mixlup.overlap)[2,] - minmax(mixlup.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  mixlup.overlap.auc <- AUC(obs = mixlup.test, pred = mixlup.overlapnorm)
+  mixlup.idm.auc <- AUC(obs = mixlup.test, pred = mixlup.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   mixlup.overlap.tssdf <- mixlup.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixlup.overlap.tstar <- which.max(mixlup.overlap.tssdf$TSS)
   mixlup.idm.tssdf <- mixlup.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixlup.idm.tstar <- which.max(mixlup.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  mixlup.idmnorm = (mixlup.idm - minmax(mixlup.idm)[1,])/(minmax(mixlup.idm)[2,] - minmax(mixlup.idm)[1,])
-  mixlup.overlapnorm = (mixlup.overlap - minmax(mixlup.overlap)[1,])/(minmax(mixlup.overlap)[2,] - minmax(mixlup.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -2932,7 +2660,7 @@ for(i in 1:100){
   tstar.overlap = (mixlup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(mixlup.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixlup.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixlup.overlapthresh[[i]] = overlap.thresh
@@ -2940,7 +2668,7 @@ for(i in 1:100){
   tstar.idm = (mixlup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(mixlup.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixlup.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixlup.idmthresh[[i]] = idm.thresh
@@ -3013,7 +2741,7 @@ mixpen <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r mixpen maxent for loop, message = F}
+```{r mixpen maxent for loop, message = F, eval = T, results = "hide"}
 mixpen.overlaplist <- vector(mode = "list", length = 100)
 mixpen.idmlist <- vector(mode = "list", length = 100)
 mixpen.overlapthresh <- vector(mode = "list", length = 100)
@@ -3093,21 +2821,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  mixpen.overlap.auc <- AUC(obs = mixpen.test, pred = mixpen.overlap)
-  mixpen.idm.auc <- AUC(obs = mixpen.test, pred = mixpen.idm)
+  ## Step 4a: Normalize rasters for RMSE calculation
+  mixpen.idmnorm = (mixpen.idm - minmax(mixpen.idm)[1,])/(minmax(mixpen.idm)[2,] - minmax(mixpen.idm)[1,])
+  mixpen.overlapnorm = (mixpen.overlap - minmax(mixpen.overlap)[1,])/(minmax(mixpen.overlap)[2,] - minmax(mixpen.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  mixpen.overlap.auc <- AUC(obs = mixpen.test, pred = mixpen.overlapnorm)
+  mixpen.idm.auc <- AUC(obs = mixpen.test, pred = mixpen.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   mixpen.overlap.tssdf <- mixpen.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixpen.overlap.tstar <- which.max(mixpen.overlap.tssdf$TSS)
   mixpen.idm.tssdf <- mixpen.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixpen.idm.tstar <- which.max(mixpen.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  mixpen.idmnorm = (mixpen.idm - minmax(mixpen.idm)[1,])/(minmax(mixpen.idm)[2,] - minmax(mixpen.idm)[1,])
-  mixpen.overlapnorm = (mixpen.overlap - minmax(mixpen.overlap)[1,])/(minmax(mixpen.overlap)[2,] - minmax(mixpen.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -3134,7 +2862,7 @@ for(i in 1:100){
   tstar.overlap = (mixpen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(mixpen.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixpen.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixpen.overlapthresh[[i]] = overlap.thresh
@@ -3142,7 +2870,7 @@ for(i in 1:100){
   tstar.idm = (mixpen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(mixpen.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixpen.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixpen.idmthresh[[i]] = idm.thresh
@@ -3215,7 +2943,7 @@ mixrub <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r mixrub maxent for loop, message = F}
+```{r mixrub maxent for loop, message = F, eval = T, results = "hide"}
 mixrub.overlaplist <- vector(mode = "list", length = 100)
 mixrub.idmlist <- vector(mode = "list", length = 100)
 mixrub.overlapthresh <- vector(mode = "list", length = 100)
@@ -3295,21 +3023,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  mixrub.overlap.auc <- AUC(obs = mixrub.test, pred = mixrub.overlap)
-  mixrub.idm.auc <- AUC(obs = mixrub.test, pred = mixrub.idm)
+  ## Step 4a: Normalize rasters
+  mixrub.idmnorm = (mixrub.idm - minmax(mixrub.idm)[1,])/(minmax(mixrub.idm)[2,] - minmax(mixrub.idm)[1,])
+  mixrub.overlapnorm = (mixrub.overlap - minmax(mixrub.overlap)[1,])/(minmax(mixrub.overlap)[2,] - minmax(mixrub.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  mixrub.overlap.auc <- AUC(obs = mixrub.test, pred = mixrub.overlapnorm)
+  mixrub.idm.auc <- AUC(obs = mixrub.test, pred = mixrub.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   mixrub.overlap.tssdf <- mixrub.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixrub.overlap.tstar <- which.max(mixrub.overlap.tssdf$TSS)
   mixrub.idm.tssdf <- mixrub.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   mixrub.idm.tstar <- which.max(mixrub.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  mixrub.idmnorm = (mixrub.idm - minmax(mixrub.idm)[1,])/(minmax(mixrub.idm)[2,] - minmax(mixrub.idm)[1,])
-  mixrub.overlapnorm = (mixrub.overlap - minmax(mixrub.overlap)[1,])/(minmax(mixrub.overlap)[2,] - minmax(mixrub.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -3336,7 +3064,7 @@ for(i in 1:100){
   tstar.overlap = (mixrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(mixrub.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(mixrub.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   mixrub.overlapthresh[[i]] = overlap.thresh
@@ -3344,7 +3072,7 @@ for(i in 1:100){
   tstar.idm = (mixrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(mixrub.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(mixrub.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   mixrub.idmthresh[[i]] = idm.thresh
@@ -3405,264 +3133,6 @@ mixrub.idm.plot <- ggplot() +
 ggsave("figures/mixrub-idm.png", mixrub.idm.plot, width = 6, height = 4, units = "in")
 ```
 
-<!-- ### Rubus spectabilis -->
-
-<!-- ```{r mixtus rubus spectabilis} -->
-<!-- gbif.rubspec <- gbif %>% -->
-<!--   filter(species == "Rubus spectabilis") -->
-
-<!-- mixrubspec.evaldf <- data.frame() -->
-
-<!-- mixrubspec.varimpdf <- data.frame() -->
-
-<!-- set.seed(240419) -->
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   mix.longlat <- bbna %>% -->
-<!--     filter(species == "mixtus", -->
-<!--            plant.host.genus != "Rubus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   mix.fold <- kfold(mix.longlat, k = 5) -->
-<!--   mix.test <- mix.longlat[mix.fold == 1,] -->
-<!--   mix.train <- mix.longlat[mix.fold != 1,] -->
-
-<!--   rubspec.longlat <- gbif.rubspec %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   rubspec.fold <- kfold(rubspec.longlat, k = 5) -->
-<!--   rubspec.test <- rubspec.longlat[rubspec.fold == 1,] -->
-<!--   rubspec.train <- rubspec.longlat[rubspec.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   mix.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = mix.train,  -->
-<!--                        a = bg.train) -->
-<!--   mix.predict <- dismo::predict(mix.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   rubspec.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = rubspec.train,  -->
-<!--                        a = bg.train) -->
-<!--   rubspec.predict <- dismo::predict(rubspec.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   mix.by.rubspec <- maxent(x = stack(stack(bioclim), rubspec.predict), -->
-<!--                        p = mix.train, -->
-<!--                        a = bg.train) -->
-<!--   rubspec.by.mix <- maxent(x = stack(stack(bioclim), mix.predict), -->
-<!--                        p = rubspec.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   mixbyrubspec.eval <- dismo::evaluate(p = mixrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = mix.by.rubspec, -->
-<!--                                    x = stack(stack(bioclim), rubspec.predict)) -->
-<!--   rubspecbymix.eval <- dismo::evaluate(p = mixrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = rubspec.by.mix, -->
-<!--                                    x = stack(stack(bioclim), mix.predict)) -->
-
-
-
-
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   mbrubspec.eval = data.frame(run = i, -->
-<!--                         model = "mbrubspec", -->
-<!--                         AUC = mixbyrubspec.eval@auc, -->
-<!--                         cor = mixbyrubspec.eval@cor, -->
-<!--                         TSS = max(mixbyrubspec.eval@TPR - mixbyrubspec.eval@FPR), -->
-<!--                         tstar = which.max(mixbyrubspec.eval@TPR - mixbyrubspec.eval@FPR)) -->
-
-<!--   rubspecbm.eval = data.frame(run = i, -->
-<!--                         model = "rubspecbm", -->
-<!--                         AUC = rubspecbymix.eval@auc, -->
-<!--                         cor = rubspecbymix.eval@cor, -->
-<!--                         TSS = max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR), -->
-<!--                         tstar = which.max(rubspecbymix.eval@TPR - rubspecbymix.eval@FPR)) -->
-
-
-
-<!--   mixrubspec.evaldf = bind_rows(mixrubspec.evaldf, mbrubspec.eval, rubspecbm.eval) -->
-
-
-
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   mbrubspec.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("mbrubspec", 21), -->
-<!--                         variable = names(mix.by.rubspec@results[7:27,]), -->
-<!--                         percent = mix.by.rubspec@results[7:27], -->
-<!--                         permutation = mix.by.rubspec@results[28:48]) -->
-
-<!--   rubspecbm.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("rubspecbm", 21), -->
-<!--                         variable = names(rubspec.by.mix@results[7:27,]), -->
-<!--                         percent = rubspec.by.mix@results[7:27], -->
-<!--                         permutation = rubspec.by.mix@results[28:48]) -->
-
-
-
-<!--   mixrubspec.varimpdf = bind_rows(mixrubspec.varimpdf, mbrubspec.vars, rubspecbm.vars) -->
-<!-- } -->
-<!-- ``` -->
-
-
-<!-- ### Rubus parviflorus -->
-
-<!-- ```{r mixtus rubus parviflorus} -->
-<!-- gbif.rubparv <- gbif %>% -->
-<!--   filter(species == "Rubus parviflorus") -->
-
-<!-- mixrubparv.evaldf <- data.frame() -->
-
-<!-- mixrubparv.varimpdf <- data.frame() -->
-
-<!-- set.seed(2024419) -->
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   mix.longlat <- bbna %>% -->
-<!--     filter(species == "mixtus", -->
-<!--            plant.host.genus != "Rubus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   mix.fold <- kfold(mix.longlat, k = 5) -->
-<!--   mix.test <- mix.longlat[mix.fold == 1,] -->
-<!--   mix.train <- mix.longlat[mix.fold != 1,] -->
-
-<!--   rubparv.longlat <- gbif.rubparv %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   rubparv.fold <- kfold(rubparv.longlat, k = 5) -->
-<!--   rubparv.test <- rubparv.longlat[rubparv.fold == 1,] -->
-<!--   rubparv.train <- rubparv.longlat[rubparv.fold != 1,] -->
-
-<!--   mixrubparv.longlat <- mixrub %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   mixrubparv.fold <- kfold(mixrubparv.longlat, k = 5) -->
-<!--   mixrubparv.test <- mixrubparv.longlat[mixrubparv.fold == 1,] -->
-<!--   mixrubparv.train <- mixrubparv.longlat[mixrubparv.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   mix.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = mix.train,  -->
-<!--                        a = bg.train) -->
-<!--   mix.predict <- dismo::predict(mix.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   rubparv.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = rubparv.train,  -->
-<!--                        a = bg.train) -->
-<!--   rubparv.predict <- dismo::predict(rubparv.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   mix.by.rubparv <- maxent(x = stack(stack(bioclim), rubparv.predict), -->
-<!--                        p = mix.train, -->
-<!--                        a = bg.train) -->
-<!--   rubparv.by.mix <- maxent(x = stack(stack(bioclim), mix.predict), -->
-<!--                        p = rubparv.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   mixbyrubparv.eval <- dismo::evaluate(p = mixrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = mix.by.rubparv, -->
-<!--                                    x = stack(stack(bioclim), rubparv.predict)) -->
-<!--   rubparvbymix.eval <- dismo::evaluate(p = mixrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = rubparv.by.mix, -->
-<!--                                    x = stack(stack(bioclim), mix.predict)) -->
-
-
-
-
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   mbrubparv.eval = data.frame(run = i, -->
-<!--                         model = "mbrubparv", -->
-<!--                         AUC = mixbyrubparv.eval@auc, -->
-<!--                         cor = mixbyrubparv.eval@cor, -->
-<!--                         TSS = max(mixbyrubparv.eval@TPR - mixbyrubparv.eval@FPR), -->
-<!--                         tstar = which.max(mixbyrubparv.eval@TPR - mixbyrubparv.eval@FPR)) -->
-
-<!--   rubparvbm.eval = data.frame(run = i, -->
-<!--                         model = "rubparvbm", -->
-<!--                         AUC = rubparvbymix.eval@auc, -->
-<!--                         cor = rubparvbymix.eval@cor, -->
-<!--                         TSS = max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR), -->
-<!--                         tstar = which.max(rubparvbymix.eval@TPR - rubparvbymix.eval@FPR)) -->
-
-
-
-<!--   mixrubparv.evaldf = bind_rows(mixrubparv.evaldf, mbrubparv.eval, rubparvbm.eval) -->
-
-
-
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   mbrubparv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("mbrubparv", 21), -->
-<!--                         variable = names(mix.by.rubparv@results[7:27,]), -->
-<!--                         percent = mix.by.rubparv@results[7:27], -->
-<!--                         permutation = mix.by.rubparv@results[28:48]) -->
-
-<!--   rubparvbm.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("rubparvbm", 21), -->
-<!--                         variable = names(rubparv.by.mix@results[7:27,]), -->
-<!--                         percent = rubparv.by.mix@results[7:27], -->
-<!--                         permutation = rubparv.by.mix@results[28:48]) -->
-
-
-
-<!--   mixrubparv.varimpdf = bind_rows(mixrubparv.varimpdf, mbrubparv.vars, rubparvbm.vars) -->
-<!-- } -->
-<!-- ``` -->
-
 
 # Vosnesenskii
 ## Chamaenerion
@@ -3677,7 +3147,7 @@ voscham <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r voscham maxent for loop, message = F}
+```{r voscham maxent for loop, message = F, eval = T, results = "hide"}
 voscham.overlaplist <- vector(mode = "list", length = 100)
 voscham.idmlist <- vector(mode = "list", length = 100)
 voscham.overlapthresh <- vector(mode = "list", length = 100)
@@ -3757,21 +3227,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  voscham.overlap.auc <- AUC(obs = voscham.test, pred = voscham.overlap)
-  voscham.idm.auc <- AUC(obs = voscham.test, pred = voscham.idm)
+  ## Step 4a: Normalize rasters
+  voscham.idmnorm = (voscham.idm - minmax(voscham.idm)[1,])/(minmax(voscham.idm)[2,] - minmax(voscham.idm)[1,])
+  voscham.overlapnorm = (voscham.overlap - minmax(voscham.overlap)[1,])/(minmax(voscham.overlap)[2,] - minmax(voscham.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  voscham.overlap.auc <- AUC(obs = voscham.test, pred = voscham.overlapnorm)
+  voscham.idm.auc <- AUC(obs = voscham.test, pred = voscham.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   voscham.overlap.tssdf <- voscham.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voscham.overlap.tstar <- which.max(voscham.overlap.tssdf$TSS)
   voscham.idm.tssdf <- voscham.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voscham.idm.tstar <- which.max(voscham.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  voscham.idmnorm = (voscham.idm - minmax(voscham.idm)[1,])/(minmax(voscham.idm)[2,] - minmax(voscham.idm)[1,])
-  voscham.overlapnorm = (voscham.overlap - minmax(voscham.overlap)[1,])/(minmax(voscham.overlap)[2,] - minmax(voscham.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -3798,7 +3268,7 @@ for(i in 1:100){
   tstar.overlap = (voscham.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(voscham.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voscham.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voscham.overlapthresh[[i]] = overlap.thresh
@@ -3806,7 +3276,7 @@ for(i in 1:100){
   tstar.idm = (voscham.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(voscham.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voscham.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voscham.idmthresh[[i]] = idm.thresh
@@ -3879,7 +3349,7 @@ voscir <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r voscir maxent for loop, message = F}
+```{r voscir maxent for loop, message = F, eval = T, results = "hide"}
 voscir.overlaplist <- vector(mode = "list", length = 100)
 voscir.idmlist <- vector(mode = "list", length = 100)
 voscir.overlapthresh <- vector(mode = "list", length = 100)
@@ -3959,21 +3429,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  voscir.overlap.auc <- AUC(obs = voscir.test, pred = voscir.overlap)
-  voscir.idm.auc <- AUC(obs = voscir.test, pred = voscir.idm)
+  ## Step 4a: Normalize rasters for RMSE calculation
+  voscir.idmnorm = (voscir.idm - minmax(voscir.idm)[1,])/(minmax(voscir.idm)[2,] - minmax(voscir.idm)[1,])
+  voscir.overlapnorm = (voscir.overlap - minmax(voscir.overlap)[1,])/(minmax(voscir.overlap)[2,] - minmax(voscir.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  voscir.overlap.auc <- AUC(obs = voscir.test, pred = voscir.overlapnorm)
+  voscir.idm.auc <- AUC(obs = voscir.test, pred = voscir.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   voscir.overlap.tssdf <- voscir.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voscir.overlap.tstar <- which.max(voscir.overlap.tssdf$TSS)
   voscir.idm.tssdf <- voscir.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voscir.idm.tstar <- which.max(voscir.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  voscir.idmnorm = (voscir.idm - minmax(voscir.idm)[1,])/(minmax(voscir.idm)[2,] - minmax(voscir.idm)[1,])
-  voscir.overlapnorm = (voscir.overlap - minmax(voscir.overlap)[1,])/(minmax(voscir.overlap)[2,] - minmax(voscir.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -4000,7 +3470,7 @@ for(i in 1:100){
   tstar.overlap = (voscir.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(voscir.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voscir.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voscir.overlapthresh[[i]] = overlap.thresh
@@ -4008,7 +3478,7 @@ for(i in 1:100){
   tstar.idm = (voscir.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(voscir.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voscir.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voscir.idmthresh[[i]] = idm.thresh
@@ -4161,21 +3631,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  voslup.overlap.auc <- AUC(obs = voslup.test, pred = voslup.overlap)
-  voslup.idm.auc <- AUC(obs = voslup.test, pred = voslup.idm)
+  ## Step 4a: Normalize rasters
+  voslup.idmnorm = (voslup.idm - minmax(voslup.idm)[1,])/(minmax(voslup.idm)[2,] - minmax(voslup.idm)[1,])
+  voslup.overlapnorm = (voslup.overlap - minmax(voslup.overlap)[1,])/(minmax(voslup.overlap)[2,] - minmax(voslup.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  voslup.overlap.auc <- AUC(obs = voslup.test, pred = voslup.overlapnorm)
+  voslup.idm.auc <- AUC(obs = voslup.test, pred = voslup.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   voslup.overlap.tssdf <- voslup.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voslup.overlap.tstar <- which.max(voslup.overlap.tssdf$TSS)
   voslup.idm.tssdf <- voslup.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   voslup.idm.tstar <- which.max(voslup.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  voslup.idmnorm = (voslup.idm - minmax(voslup.idm)[1,])/(minmax(voslup.idm)[2,] - minmax(voslup.idm)[1,])
-  voslup.overlapnorm = (voslup.overlap - minmax(voslup.overlap)[1,])/(minmax(voslup.overlap)[2,] - minmax(voslup.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -4202,7 +3672,7 @@ for(i in 1:100){
   tstar.overlap = (voslup.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(voslup.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(voslup.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   voslup.overlapthresh[[i]] = overlap.thresh
@@ -4210,7 +3680,7 @@ for(i in 1:100){
   tstar.idm = (voslup.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(voslup.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(voslup.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   voslup.idmthresh[[i]] = idm.thresh
@@ -4270,247 +3740,6 @@ voslup.idm.plot <- ggplot() +
                      limits = c(0, 1))
 ggsave("figures/voslup-idm.png", voslup.idm.plot, width = 6, height = 4, units = "in")
 ```
-
-<!-- ### L. polyphyllus -->
-
-<!-- ```{r vos X lupinus polyphyllus} -->
-<!-- gbif.luppoly <- gbif %>% -->
-<!--   filter(species == "Lupinus polyphyllus") -->
-
-<!-- vosluppoly.evaldf <- data.frame() -->
-
-<!-- vosluppoly.varimpdf <- data.frame() -->
-
-<!-- set.seed(42224) -->
-
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   vos.longlat <- bbna %>% -->
-<!--     filter(species == "vosnesenskii", -->
-<!--            plant.host.genus != "Lupinus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vos.fold <- kfold(vos.longlat, k = 5) -->
-<!--   vos.test <- vos.longlat[vos.fold == 1,] -->
-<!--   vos.train <- vos.longlat[vos.fold != 1,] -->
-
-<!--   luppoly.longlat <- gbif.luppoly %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   luppoly.fold <- kfold(luppoly.longlat, k = 5) -->
-<!--   luppoly.test <- luppoly.longlat[luppoly.fold == 1,] -->
-<!--   luppoly.train <- luppoly.longlat[luppoly.fold != 1,] -->
-
-<!--   voslup.longlat <- voslup %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   voslup.fold <- kfold(voslup.longlat, k = 5) -->
-<!--   voslup.test <- voslup.longlat[voslup.fold == 1,] -->
-<!--   voslup.train <- voslup.longlat[voslup.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   vos.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = vos.train,  -->
-<!--                        a = bg.train) -->
-<!--   vos.predict <- dismo::predict(vos.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   luppoly.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = luppoly.train,  -->
-<!--                        a = bg.train) -->
-<!--   luppoly.predict <- dismo::predict(luppoly.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   vos.by.luppoly <- maxent(x = stack(stack(bioclim), luppoly.predict), -->
-<!--                        p = vos.train, -->
-<!--                        a = bg.train) -->
-<!--   luppoly.by.vos <- maxent(x = stack(stack(bioclim), vos.predict), -->
-<!--                        p = luppoly.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   vosbyluppoly.eval <- dismo::evaluate(p = voslup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = vos.by.luppoly, -->
-<!--                                    x = stack(stack(bioclim), luppoly.predict)) -->
-<!--   luppolybyvos.eval <- dismo::evaluate(p = voslup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = luppoly.by.vos, -->
-<!--                                    x = stack(stack(bioclim), vos.predict)) -->
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   vblpoly.eval = data.frame(run = i, -->
-<!--                         model = "vblpoly", -->
-<!--                         AUC = vosbyluppoly.eval@auc, -->
-<!--                         cor = vosbyluppoly.eval@cor, -->
-<!--                         TSS = max(vosbyluppoly.eval@TPR - vosbyluppoly.eval@FPR), -->
-<!--                         tstar = which.max(vosbyluppoly.eval@TPR - vosbyluppoly.eval@FPR)) -->
-
-<!--   lpolybv.eval = data.frame(run = i, -->
-<!--                         model = "lpolybv", -->
-<!--                         AUC = luppolybyvos.eval@auc, -->
-<!--                         cor = luppolybyvos.eval@cor, -->
-<!--                         TSS = max(luppolybyvos.eval@TPR - luppolybyvos.eval@FPR), -->
-<!--                         tstar = which.max(luppolybyvos.eval@TPR - luppolybyvos.eval@FPR)) -->
-
-
-
-<!--   vosluppoly.evaldf = bind_rows(vosluppoly.evaldf, vblpoly.eval, lpolybv.eval) -->
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   vblpoly.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("vblpoly", 21), -->
-<!--                         variable = names(vos.by.luppoly@results[7:27,]), -->
-<!--                         percent = vos.by.luppoly@results[7:27], -->
-<!--                         permutation = vos.by.luppoly@results[28:48]) -->
-
-<!--   lpolybv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("lpolybv", 21), -->
-<!--                         variable = names(luppoly.by.vos@results[7:27,]), -->
-<!--                         percent = luppoly.by.vos@results[7:27], -->
-<!--                         permutation = luppoly.by.vos@results[28:48]) -->
-
-<!--   vosluppoly.varimpdf = bind_rows(vosluppoly.varimpdf, vblpoly.vars, lpolybv.vars) -->
-<!-- } -->
-<!-- ``` -->
-
-<!-- ### L. bicolor -->
-
-<!-- ```{r vos X lupinus bicolor} -->
-<!-- gbif.lupbicolor <- gbif %>% -->
-<!--   filter(species == "Lupinus bicolor") -->
-
-<!-- voslupbicolor.evaldf <- data.frame() -->
-
-<!-- voslupbicolor.varimpdf <- data.frame() -->
-
-<!-- set.seed(423224) -->
-
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   vos.longlat <- bbna %>% -->
-<!--     filter(species == "vosnesenskii", -->
-<!--            plant.host.genus != "Lupinus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vos.fold <- kfold(vos.longlat, k = 5) -->
-<!--   vos.test <- vos.longlat[vos.fold == 1,] -->
-<!--   vos.train <- vos.longlat[vos.fold != 1,] -->
-
-<!--   lupbicolor.longlat <- gbif.lupbicolor %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   lupbicolor.fold <- kfold(lupbicolor.longlat, k = 5) -->
-<!--   lupbicolor.test <- lupbicolor.longlat[lupbicolor.fold == 1,] -->
-<!--   lupbicolor.train <- lupbicolor.longlat[lupbicolor.fold != 1,] -->
-
-
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   vos.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = vos.train,  -->
-<!--                        a = bg.train) -->
-<!--   vos.predict <- dismo::predict(vos.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   lupbicolor.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = lupbicolor.train,  -->
-<!--                        a = bg.train) -->
-<!--   lupbicolor.predict <- dismo::predict(lupbicolor.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   vos.by.lupbicolor <- maxent(x = stack(stack(bioclim), lupbicolor.predict), -->
-<!--                        p = vos.train, -->
-<!--                        a = bg.train) -->
-<!--   lupbicolor.by.vos <- maxent(x = stack(stack(bioclim), vos.predict), -->
-<!--                        p = lupbicolor.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   vosbylupbicolor.eval <- dismo::evaluate(p = voslup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = vos.by.lupbicolor, -->
-<!--                                    x = stack(stack(bioclim), lupbicolor.predict)) -->
-<!--   lupbicolorbyvos.eval <- dismo::evaluate(p = voslup.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = lupbicolor.by.vos, -->
-<!--                                    x = stack(stack(bioclim), vos.predict)) -->
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   vblbicolor.eval = data.frame(run = i, -->
-<!--                         model = "vblbicolor", -->
-<!--                         AUC = vosbylupbicolor.eval@auc, -->
-<!--                         cor = vosbylupbicolor.eval@cor, -->
-<!--                         TSS = max(vosbylupbicolor.eval@TPR - vosbylupbicolor.eval@FPR), -->
-<!--                         tstar = which.max(vosbylupbicolor.eval@TPR - vosbylupbicolor.eval@FPR)) -->
-
-<!--   lbicolorbv.eval = data.frame(run = i, -->
-<!--                         model = "lbicolorbv", -->
-<!--                         AUC = lupbicolorbyvos.eval@auc, -->
-<!--                         cor = lupbicolorbyvos.eval@cor, -->
-<!--                         TSS = max(lupbicolorbyvos.eval@TPR - lupbicolorbyvos.eval@FPR), -->
-<!--                         tstar = which.max(lupbicolorbyvos.eval@TPR - lupbicolorbyvos.eval@FPR)) -->
-
-
-
-<!--   voslupbicolor.evaldf = bind_rows(voslupbicolor.evaldf, vblbicolor.eval, lbicolorbv.eval) -->
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   vblbicolor.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("vblbicolor", 21), -->
-<!--                         variable = names(vos.by.lupbicolor@results[7:27,]), -->
-<!--                         percent = vos.by.lupbicolor@results[7:27], -->
-<!--                         permutation = vos.by.lupbicolor@results[28:48]) -->
-
-<!--   lbicolorbv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("lbicolorbv", 21), -->
-<!--                         variable = names(lupbicolor.by.vos@results[7:27,]), -->
-<!--                         percent = lupbicolor.by.vos@results[7:27], -->
-<!--                         permutation = lupbicolor.by.vos@results[28:48]) -->
-
-<!--   voslupbicolor.varimpdf = bind_rows(voslupbicolor.varimpdf, vblbicolor.vars, lbicolorbv.vars) -->
-<!-- } -->
-<!-- ``` -->
 
 ## Penstemon
 
@@ -4604,21 +3833,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  vospen.overlap.auc <- AUC(obs = vospen.test, pred = vospen.overlap)
-  vospen.idm.auc <- AUC(obs = vospen.test, pred = vospen.idm)
+  ## Step 4a: Normalize rasters
+  vospen.idmnorm = (vospen.idm - minmax(vospen.idm)[1,])/(minmax(vospen.idm)[2,] - minmax(vospen.idm)[1,])
+  vospen.overlapnorm = (vospen.overlap - minmax(vospen.overlap)[1,])/(minmax(vospen.overlap)[2,] - minmax(vospen.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  vospen.overlap.auc <- AUC(obs = vospen.test, pred = vospen.overlapnorm)
+  vospen.idm.auc <- AUC(obs = vospen.test, pred = vospen.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   vospen.overlap.tssdf <- vospen.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   vospen.overlap.tstar <- which.max(vospen.overlap.tssdf$TSS)
   vospen.idm.tssdf <- vospen.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   vospen.idm.tstar <- which.max(vospen.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  vospen.idmnorm = (vospen.idm - minmax(vospen.idm)[1,])/(minmax(vospen.idm)[2,] - minmax(vospen.idm)[1,])
-  vospen.overlapnorm = (vospen.overlap - minmax(vospen.overlap)[1,])/(minmax(vospen.overlap)[2,] - minmax(vospen.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -4645,7 +3874,7 @@ for(i in 1:100){
   tstar.overlap = (vospen.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(vospen.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(vospen.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   vospen.overlapthresh[[i]] = overlap.thresh
@@ -4653,7 +3882,7 @@ for(i in 1:100){
   tstar.idm = (vospen.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(vospen.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(vospen.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   vospen.idmthresh[[i]] = idm.thresh
@@ -4726,7 +3955,7 @@ vosrub <- bbna %>%
   dplyr::select(latitude, longitude, plant.host.genus, date, month, day, year)
 ```
 
-```{r vosrub maxent for loop, message = F}
+```{r vosrub maxent for loop, message = F, eval = T, results = "hide"}
 vosrub.overlaplist <- vector(mode = "list", length = 100)
 vosrub.idmlist <- vector(mode = "list", length = 100)
 vosrub.overlapthresh <- vector(mode = "list", length = 100)
@@ -4806,21 +4035,21 @@ for(i in 1:100){
   
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
-  ## Step 4a: Use modEvA::AUC to get AUC
-  vosrub.overlap.auc <- AUC(obs = vosrub.test, pred = vosrub.overlap)
-  vosrub.idm.auc <- AUC(obs = vosrub.test, pred = vosrub.idm)
+  ## Step 4a: Normalize rasters
+  vosrub.idmnorm = (vosrub.idm - minmax(vosrub.idm)[1,])/(minmax(vosrub.idm)[2,] - minmax(vosrub.idm)[1,])
+  vosrub.overlapnorm = (vosrub.overlap - minmax(vosrub.overlap)[1,])/(minmax(vosrub.overlap)[2,] - minmax(vosrub.overlap)[1,])
   
-  ## Step 4b: Calculate TSS and tstar
+  ## Step 4b: Use modEvA::AUC to get AUC
+  vosrub.overlap.auc <- AUC(obs = vosrub.test, pred = vosrub.overlapnorm)
+  vosrub.idm.auc <- AUC(obs = vosrub.test, pred = vosrub.idmnorm)
+  
+  ## Step 4c: Calculate TSS and tstar
   vosrub.overlap.tssdf <- vosrub.overlap.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   vosrub.overlap.tstar <- which.max(vosrub.overlap.tssdf$TSS)
   vosrub.idm.tssdf <- vosrub.idm.auc$thresholds %>%
     mutate(TSS = sensitivity + specificity - 1)
   vosrub.idm.tstar <- which.max(vosrub.idm.tssdf$TSS)
-  
-  ## Step 4c: Normalize rasters for RMSE calculation
-  vosrub.idmnorm = (vosrub.idm - minmax(vosrub.idm)[1,])/(minmax(vosrub.idm)[2,] - minmax(vosrub.idm)[1,])
-  vosrub.overlapnorm = (vosrub.overlap - minmax(vosrub.overlap)[1,])/(minmax(vosrub.overlap)[2,] - minmax(vosrub.overlap)[1,])
   
   ## Step 4d: Save evaluation scores
   ### Note: RMSE is the same for both so it is only noted under the overlap
@@ -4847,7 +4076,7 @@ for(i in 1:100){
   tstar.overlap = (vosrub.evaldf %>%
     filter(run == i,
            model == "overlap"))$tstar
-  overlap.thresh = clamp(vosrub.overlap, lower = tstar.overlap, upper = 1, values = T)
+  overlap.thresh = clamp(vosrub.overlapnorm, lower = tstar.overlap, upper = 1, values = T)
   overlap.thresh[overlap.thresh > tstar.overlap] = 1
   overlap.thresh[overlap.thresh <= tstar.overlap] = 0
   vosrub.overlapthresh[[i]] = overlap.thresh
@@ -4855,7 +4084,7 @@ for(i in 1:100){
   tstar.idm = (vosrub.evaldf %>%
     filter(run == i,
            model == "IDM"))$tstar
-  idm.thresh = clamp(vosrub.idm, lower = tstar.idm, upper = 1, values = T)
+  idm.thresh = clamp(vosrub.idmnorm, lower = tstar.idm, upper = 1, values = T)
   idm.thresh[idm.thresh > tstar.idm] = 1
   idm.thresh[idm.thresh <= tstar.idm] = 0
   vosrub.idmthresh[[i]] = idm.thresh
@@ -4915,271 +4144,6 @@ vosrub.idm.plot <- ggplot() +
                      limits = c(0, 1))
 ggsave("figures/vosrub-idm.png", vosrub.idm.plot, width = 6, height = 4, units = "in")
 ```
-
-<!-- ### Rubus spectabilis -->
-
-<!-- ```{r mixtus rubus spectabilis} -->
-<!-- gbif.rubspec <- gbif %>% -->
-<!--   filter(species == "Rubus spectabilis") -->
-
-<!-- vosrubspec.evaldf <- data.frame() -->
-
-<!-- vosrubspec.varimpdf <- data.frame() -->
-
-<!-- set.seed(24224) -->
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   vos.longlat <- bbna %>% -->
-<!--     filter(species == "vosnesenskii", -->
-<!--            plant.host.genus != "Rubus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vos.fold <- kfold(vos.longlat, k = 5) -->
-<!--   vos.test <- vos.longlat[vos.fold == 1,] -->
-<!--   vos.train <- vos.longlat[vos.fold != 1,] -->
-
-<!--   rubspec.longlat <- gbif.rubspec %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   rubspec.fold <- kfold(rubspec.longlat, k = 5) -->
-<!--   rubspec.test <- rubspec.longlat[rubspec.fold == 1,] -->
-<!--   rubspec.train <- rubspec.longlat[rubspec.fold != 1,] -->
-
-<!--   vosrubspec.longlat <- vosrub %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vosrubspec.fold <- kfold(vosrubspec.longlat, k = 5) -->
-<!--   vosrubspec.test <- vosrubspec.longlat[vosrubspec.fold == 1,] -->
-<!--   vosrubspec.train <- vosrubspec.longlat[vosrubspec.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   vos.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = vos.train,  -->
-<!--                        a = bg.train) -->
-<!--   vos.predict <- dismo::predict(vos.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   rubspec.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = rubspec.train,  -->
-<!--                        a = bg.train) -->
-<!--   rubspec.predict <- dismo::predict(rubspec.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   vos.by.rubspec <- maxent(x = stack(stack(bioclim), rubspec.predict), -->
-<!--                        p = vos.train, -->
-<!--                        a = bg.train) -->
-<!--   rubspec.by.vos <- maxent(x = stack(stack(bioclim), vos.predict), -->
-<!--                        p = rubspec.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   vosbyrubspec.eval <- dismo::evaluate(p = vosrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = vos.by.rubspec, -->
-<!--                                    x = stack(stack(bioclim), rubspec.predict)) -->
-<!--   rubspecbyvos.eval <- dismo::evaluate(p = vosrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = rubspec.by.vos, -->
-<!--                                    x = stack(stack(bioclim), vos.predict)) -->
-
-
-
-
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   vbrubspec.eval = data.frame(run = i, -->
-<!--                         model = "vbrubspec", -->
-<!--                         AUC = vosbyrubspec.eval@auc, -->
-<!--                         cor = vosbyrubspec.eval@cor, -->
-<!--                         TSS = max(vosbyrubspec.eval@TPR - vosbyrubspec.eval@FPR), -->
-<!--                         tstar = which.max(vosbyrubspec.eval@TPR - vosbyrubspec.eval@FPR)) -->
-
-<!--   rubspecbv.eval = data.frame(run = i, -->
-<!--                         model = "rubspecbv", -->
-<!--                         AUC = rubspecbyvos.eval@auc, -->
-<!--                         cor = rubspecbyvos.eval@cor, -->
-<!--                         TSS = max(rubspecbyvos.eval@TPR - rubspecbyvos.eval@FPR), -->
-<!--                         tstar = which.max(rubspecbyvos.eval@TPR - rubspecbyvos.eval@FPR)) -->
-
-
-
-<!--   vosrubspec.evaldf = bind_rows(vosrubspec.evaldf, vbrubspec.eval, rubspecbv.eval) -->
-
-
-
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   vbrubspec.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("vbrubspec", 21), -->
-<!--                         variable = names(vos.by.rubspec@results[7:27,]), -->
-<!--                         percent = vos.by.rubspec@results[7:27], -->
-<!--                         permutation = vos.by.rubspec@results[28:48]) -->
-
-<!--   rubspecbv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("rubspecbv", 21), -->
-<!--                         variable = names(rubspec.by.vos@results[7:27,]), -->
-<!--                         percent = rubspec.by.vos@results[7:27], -->
-<!--                         permutation = rubspec.by.vos@results[28:48]) -->
-
-
-
-<!--   vosrubspec.varimpdf = bind_rows(vosrubspec.varimpdf, vbrubspec.vars, rubspecbv.vars) -->
-<!-- } -->
-<!-- ``` -->
-
-
-<!-- ### Rubus parviflorus -->
-
-<!-- ```{r mixtus rubus parviflorus} -->
-<!-- gbif.rubparv <- gbif %>% -->
-<!--   filter(species == "Rubus parviflorus") -->
-
-<!-- vosrubparv.evaldf <- data.frame() -->
-
-<!-- vosrubparv.varimpdf <- data.frame() -->
-
-<!-- set.seed(2024419) -->
-<!-- for(i in 1:100){ -->
-<!--   # Step 1: separate all data into training and testing datasets -->
-<!--   bg <- as.data.frame(spatSample(x = bioclim, size = 10000, method = "random", na.rm = T, xy = T)) %>% -->
-<!--     dplyr::select(x, y) %>% -->
-<!--     rename(longitude = x, -->
-<!--            latitude = y) -->
-<!--   bgfold <- kfold(bg, k = 5) -->
-<!--   bg.test <- bg[bgfold == 1,] -->
-<!--   bg.train <- bg[bgfold != 1,] -->
-
-<!--   vos.longlat <- bbna %>% -->
-<!--     filter(species == "vosnesenskii", -->
-<!--            plant.host.genus != "Rubus") %>% -->
-<!--     slice_sample(by = BBNA.code, n = 1) %>% -->
-<!--     dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vos.fold <- kfold(vos.longlat, k = 5) -->
-<!--   vos.test <- vos.longlat[vos.fold == 1,] -->
-<!--   vos.train <- vos.longlat[vos.fold != 1,] -->
-
-<!--   rubparv.longlat <- gbif.rubparv %>% -->
-<!--   dplyr::select(decimalLongitude, decimalLatitude) %>% -->
-<!--   as.data.frame(.) %>% -->
-<!--   rename(longitude = decimalLongitude, -->
-<!--          latitude = decimalLatitude) -->
-<!--   rubparv.fold <- kfold(rubparv.longlat, k = 5) -->
-<!--   rubparv.test <- rubparv.longlat[rubparv.fold == 1,] -->
-<!--   rubparv.train <- rubparv.longlat[rubparv.fold != 1,] -->
-
-<!--   vosrubparv.longlat <- vosrub %>% -->
-<!--   dplyr::select(longitude, latitude) %>% -->
-<!--   as.data.frame(.) -->
-<!--   vosrubparv.fold <- kfold(vosrubparv.longlat, k = 5) -->
-<!--   vosrubparv.test <- vosrubparv.longlat[vosrubparv.fold == 1,] -->
-<!--   vosrubparv.train <- vosrubparv.longlat[vosrubparv.fold != 1,] -->
-
-
-
-<!--   # Step 2: Calculate overlaps -->
-<!--   ## Step 2a: Initial models based on just bioclim variables -->
-<!--   vos.maxent <- maxent(x = stack(bioclim), -->
-<!--                        p = vos.train,  -->
-<!--                        a = bg.train) -->
-<!--   vos.predict <- dismo::predict(vos.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   rubparv.maxent <- maxent(x = stack(bioclim),  -->
-<!--                        p = rubparv.train,  -->
-<!--                        a = bg.train) -->
-<!--   rubparv.predict <- dismo::predict(rubparv.maxent, -->
-<!--                                 stack(bioclim)) -->
-
-<!--   ## Step 2b: Updated models including partner -->
-<!--   vos.by.rubparv <- maxent(x = stack(stack(bioclim), rubparv.predict), -->
-<!--                        p = vos.train, -->
-<!--                        a = bg.train) -->
-<!--   rubparv.by.vos <- maxent(x = stack(stack(bioclim), vos.predict), -->
-<!--                        p = rubparv.train, -->
-<!--                        a = bg.train) -->
-
-
-
-
-
-<!--   # Step 4: Evaluate all both overlap models and IDM with the same interaction test data -->
-<!--   ## Step 4a: Use dismo::evaluate to get AUC and TSS scores -->
-<!--   vosbyrubparv.eval <- dismo::evaluate(p = vosrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = vos.by.rubparv, -->
-<!--                                    x = stack(stack(bioclim), rubparv.predict)) -->
-<!--   rubparvbyvos.eval <- dismo::evaluate(p = vosrub.test, -->
-<!--                                    a = bg.test, -->
-<!--                                    model = rubparv.by.vos, -->
-<!--                                    x = stack(stack(bioclim), vos.predict)) -->
-
-
-
-
-
-
-<!--   # Step 5: Save Evaluation Scores -->
-<!--   vbrubparv.eval = data.frame(run = i, -->
-<!--                         model = "vbrubparv", -->
-<!--                         AUC = vosbyrubparv.eval@auc, -->
-<!--                         cor = vosbyrubparv.eval@cor, -->
-<!--                         TSS = max(vosbyrubparv.eval@TPR - vosbyrubparv.eval@FPR), -->
-<!--                         tstar = which.max(vosbyrubparv.eval@TPR - vosbyrubparv.eval@FPR)) -->
-
-<!--   rubparvbv.eval = data.frame(run = i, -->
-<!--                         model = "rubparvbv", -->
-<!--                         AUC = rubparvbyvos.eval@auc, -->
-<!--                         cor = rubparvbyvos.eval@cor, -->
-<!--                         TSS = max(rubparvbyvos.eval@TPR - rubparvbyvos.eval@FPR), -->
-<!--                         tstar = which.max(rubparvbyvos.eval@TPR - rubparvbyvos.eval@FPR)) -->
-
-
-
-<!--   vosrubparv.evaldf = bind_rows(vosrubparv.evaldf, vbrubparv.eval, rubparvbv.eval) -->
-
-
-
-
-<!--   # Step 6: Save Variable Importance -->
-<!--   vbrubparv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("vbrubparv", 21), -->
-<!--                         variable = names(vos.by.rubparv@results[7:27,]), -->
-<!--                         percent = vos.by.rubparv@results[7:27], -->
-<!--                         permutation = vos.by.rubparv@results[28:48]) -->
-
-<!--   rubparvbv.vars = data.frame(run = rep(i, 21), -->
-<!--                         model = rep("rubparvbv", 21), -->
-<!--                         variable = names(rubparv.by.vos@results[7:27,]), -->
-<!--                         percent = rubparv.by.vos@results[7:27], -->
-<!--                         permutation = rubparv.by.vos@results[28:48]) -->
-
-
-
-<!--   vosrubparv.varimpdf = bind_rows(vosrubparv.varimpdf, vbrubparv.vars, rubparvbv.vars) -->
-<!-- } -->
-<!-- ``` -->
 
 # Session Info
 ```{r sessioninfo}
