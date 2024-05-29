@@ -21,6 +21,9 @@ library(modEvA)
 
 theme_set(theme_light() +
             theme(text = element_text(size = 20)))
+
+area.df <- data.frame()
+area.allruns <- data.frame()
 ```
 
 # Main Bumble Bee Data
@@ -71,12 +74,6 @@ bioclim <- crop(worldclim_global(var = "bio",
                                res = 2.5, 
                                path = getwd()),
                 ext(-130, -110, 40, 50))
-# 
-# elev.rast <- crop(elevation_global(res = 2.5,
-#                        path = getwd()), 
-#                        ext(-130, -110, 40, 50))
-# 
-# bioclim.elev <- c(bioclim, elev.rast)
 ```
 
 Per [Feng et al. (2019)](https://onlinelibrary.wiley.com/doi/pdf/10.1002/ece3.5555), collinearity in predictors is not a major problem for MaxEnt.
@@ -98,6 +95,8 @@ bifcham <- bbna %>%
 ```{r bifcham maxent for loop, message = F, eval = T, results = "hide"}
 bifcham.overlaplist <- vector(mode = "list", length = 100)
 bifcham.idmlist <- vector(mode = "list", length = 100)
+bifcham.overlapnormlist <- vector(mode = "list", length = 100)
+bifcham.idmnormlist <- vector(mode = "list", length = 100)
 bifcham.overlapthresh <- vector(mode = "list", length = 100)
 bifcham.idmthresh <- vector(mode = "list", length = 100)
 
@@ -173,11 +172,13 @@ for(i in 1:100){
   bifcham.idm <- as(dismo::predict(bifcham.maxent, stack(bioclim)), "SpatRaster")
   bifcham.idmlist[[i]] = bifcham.idm
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   bifcham.idmnorm = (bifcham.idm - minmax(bifcham.idm)[1,])/(minmax(bifcham.idm)[2,] - minmax(bifcham.idm)[1,])
   bifcham.overlapnorm = (bifcham.overlap - minmax(bifcham.overlap)[1,])/(minmax(bifcham.overlap)[2,] - minmax(bifcham.overlap)[1,])
+  
+  bifcham.idmnormlist[[i]] = bifcham.idmnorm
+  bifcham.overlapnormlist[[i]] = bifcham.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   bifcham.overlap.auc <- AUC(obs = bifcham.test, pred = bifcham.overlapnorm)
@@ -266,6 +267,8 @@ save(bifcham.idmlist, file = "bifcham-idms.RData")
 Here, we will build an ensemble of the 100 runs of the overlap and IDM, so I can look at them next to each other.
 
 ```{r bifcham ensemble}
+# Raw
+## Overlap
 bifcham.overlap.ensemble <- raster(mean(rast(bifcham.overlaplist[c(1:100)])))
 bifcham.overlap.spdf <- as(bifcham.overlap.ensemble, "SpatialPixelsDataFrame")
 bifcham.overlap.df <- as.data.frame(bifcham.overlap.spdf)
@@ -278,6 +281,7 @@ bifcham.overlap.plot <- ggplot() +
                      limits = c(0, 1))
 ggsave("figures/bifcham-overlap.png", bifcham.overlap.plot, width = 6, height = 4, units = "in")
 
+## IDM
 bifcham.idm.ensemble <- raster(mean(rast(bifcham.idmlist[c(1:100)])))
 bifcham.idm.spdf <- as(bifcham.idm.ensemble, "SpatialPixelsDataFrame")
 bifcham.idm.df <- as.data.frame(bifcham.idm.spdf)
@@ -288,7 +292,84 @@ bifcham.idm.plot <- ggplot() +
   theme_map() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
-ggsave("figures/bifcham-idm.png", bifcham.idm.plot, width = 6, height = 4, units = "in")
+  
+
+# Normalized
+bifcham.overlapnorm.ensemble <- raster(mean(rast(bifcham.overlapnormlist[c(1:100)])))
+bifcham.overlapnorm.spdf <- as(bifcham.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+bifcham.overlapnorm.df <- as.data.frame(bifcham.overlapnorm.spdf)
+
+bifcham.overlapnorm.plot <- ggplot() +
+  geom_tile(data = bifcham.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifcham-overlapnorm.png", bifcham.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+bifcham.idmnorm.ensemble <- raster(mean(rast(bifcham.idmnormlist[c(1:100)])))
+bifcham.idmnorm.spdf <- as(bifcham.idmnorm.ensemble, "SpatialPixelsDataFrame")
+bifcham.idmnorm.df <- as.data.frame(bifcham.idmnorm.spdf)
+
+bifcham.idmnorm.plot <- ggplot() +
+  geom_tile(data = bifcham.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifcham-idmnorm.png", bifcham.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+bifcham.overlap.tstar <- mean((bifcham.evaldf %>% filter(model == "overlap"))$tstar)
+bifcham.overlap.threshensemble <- clamp(bifcham.overlapnorm.ensemble, lower = bifcham.overlap.tstar, upper = 1, values = T)
+bifcham.overlap.threshensemble[bifcham.overlap.threshensemble > bifcham.overlap.tstar] = 1
+bifcham.overlap.threshensemble[bifcham.overlap.threshensemble <= bifcham.overlap.tstar] = 0
+
+bifcham.idm.tstar <- mean((bifcham.evaldf %>% filter(model == "IDM"))$tstar)
+bifcham.idm.threshensemble <- clamp(bifcham.idmnorm.ensemble, lower = bifcham.idm.tstar, upper = 1, values = T)
+bifcham.idm.threshensemble[bifcham.idm.threshensemble > bifcham.idm.tstar] = 10
+bifcham.idm.threshensemble[bifcham.idm.threshensemble <= bifcham.idm.tstar] = 0
+
+bifcham.threshold <- bifcham.overlap.threshensemble + bifcham.idm.threshensemble
+bifcham.thresh.spdf <- as(bifcham.threshold, "SpatialPixelsDataFrame")
+bifcham.thresh.df <- as.data.frame(bifcham.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+bifcham.thresh.plot <- ggplot() +
+  geom_tile(data = bifcham.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/bifcham-threshold.png", bifcham.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(bifcham.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(bifcham.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "bifcham",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 
@@ -307,6 +388,8 @@ bifcir <- bbna %>%
 ```{r bifcir maxent for loop, message = F, eval = T, results = "hide"}
 bifcir.overlaplist <- vector(mode = "list", length = 100)
 bifcir.idmlist <- vector(mode = "list", length = 100)
+bifcir.overlapnormlist <- vector(mode = "list", length = 100)
+bifcir.idmnormlist <- vector(mode = "list", length = 100)
 bifcir.overlapthresh <- vector(mode = "list", length = 100)
 bifcir.idmthresh <- vector(mode = "list", length = 100)
 
@@ -380,13 +463,14 @@ for(i in 1:100){
   
   bifcir.idm <- as(dismo::predict(bifcir.maxent, stack(bioclim)), "SpatRaster")
   bifcir.idmlist[[i]] = bifcir.idm
-  
-  
-  
+    
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
     ## Step 4a: Normalize rasters
   bifcir.idmnorm = (bifcir.idm - minmax(bifcir.idm)[1,])/(minmax(bifcir.idm)[2,] - minmax(bifcir.idm)[1,])
   bifcir.overlapnorm = (bifcir.overlap - minmax(bifcir.overlap)[1,])/(minmax(bifcir.overlap)[2,] - minmax(bifcir.overlap)[1,])
+  
+  bifcir.idmnormlist[[i]] = bifcir.idmnorm
+  bifcir.overlapnormlist[[i]] = bifcir.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   bifcir.overlap.auc <- AUC(obs = bifcir.test, pred = bifcir.overlapnorm)
@@ -470,6 +554,7 @@ save(bifcir.idmlist, file = "bifcir-idms.RData")
 
 
 ```{r bifcir ensemble}
+# Raw
 bifcir.overlap.ensemble <- raster(mean(rast(bifcir.overlaplist[c(1:100)])))
 bifcir.overlap.spdf <- as(bifcir.overlap.ensemble, "SpatialPixelsDataFrame")
 bifcir.overlap.df <- as.data.frame(bifcir.overlap.spdf)
@@ -493,6 +578,83 @@ bifcir.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/bifcir-idm.png", bifcir.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+bifcir.overlapnorm.ensemble <- raster(mean(rast(bifcir.overlapnormlist[c(1:100)])))
+bifcir.overlapnorm.spdf <- as(bifcir.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+bifcir.overlapnorm.df <- as.data.frame(bifcir.overlapnorm.spdf)
+
+bifcir.overlapnorm.plot <- ggplot() +
+  geom_tile(data = bifcir.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifcir-overlapnorm.png", bifcir.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+bifcir.idmnorm.ensemble <- raster(mean(rast(bifcir.idmnormlist[c(1:100)])))
+bifcir.idmnorm.spdf <- as(bifcir.idmnorm.ensemble, "SpatialPixelsDataFrame")
+bifcir.idmnorm.df <- as.data.frame(bifcir.idmnorm.spdf)
+
+bifcir.idmnorm.plot <- ggplot() +
+  geom_tile(data = bifcir.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifcir-idmnorm.png", bifcir.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+bifcir.overlap.tstar <- mean((bifcir.evaldf %>% filter(model == "overlap"))$tstar)
+bifcir.overlap.threshensemble <- clamp(bifcir.overlapnorm.ensemble, lower = bifcir.overlap.tstar, upper = 1, values = T)
+bifcir.overlap.threshensemble[bifcir.overlap.threshensemble > bifcir.overlap.tstar] = 1
+bifcir.overlap.threshensemble[bifcir.overlap.threshensemble <= bifcir.overlap.tstar] = 0
+
+bifcir.idm.tstar <- mean((bifcir.evaldf %>% filter(model == "IDM"))$tstar)
+bifcir.idm.threshensemble <- clamp(bifcir.idmnorm.ensemble, lower = bifcir.idm.tstar, upper = 1, values = T)
+bifcir.idm.threshensemble[bifcir.idm.threshensemble > bifcir.idm.tstar] = 10
+bifcir.idm.threshensemble[bifcir.idm.threshensemble <= bifcir.idm.tstar] = 0
+
+bifcir.threshold <- bifcir.overlap.threshensemble + bifcir.idm.threshensemble
+bifcir.thresh.spdf <- as(bifcir.threshold, "SpatialPixelsDataFrame")
+bifcir.thresh.df <- as.data.frame(bifcir.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+bifcir.thresh.plot <- ggplot() +
+  geom_tile(data = bifcir.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/bifcir-threshold.png", bifcir.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(bifcir.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(bifcir.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "bifcir",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Lupinus
@@ -514,6 +676,8 @@ Here we have a for-loop running MaxEnt models 100 times. For each run, we will s
 ```{r biflup maxent for loop, message = F, eval = T, results = "hide"}
 biflup.overlaplist <- vector(mode = "list", length = 100)
 biflup.idmlist <- vector(mode = "list", length = 100)
+biflup.overlapnormlist <- vector(mode = "list", length = 100)
+biflup.idmnormlist <- vector(mode = "list", length = 100)
 biflup.overlapthresh <- vector(mode = "list", length = 100)
 biflup.idmthresh <- vector(mode = "list", length = 100)
 
@@ -597,13 +761,15 @@ for(i in 1:100){
   
   biflup.idm <- as(dismo::predict(biflup.maxent, stack(bioclim)), "SpatRaster")
   biflup.idmlist[[i]] = biflup.idm
-  
-  
+
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   biflup.idmnorm = (biflup.idm - minmax(biflup.idm)[1,])/(minmax(biflup.idm)[2,] - minmax(biflup.idm)[1,])
-  biflup.overlapnorm = (biflup.overlap - minmax(biflup.overlap)[1,])/(minmax(biflup.overlap)[2,] - minmax(biflup.overlap)[1,])
+  biflup.overlapnorm = (biflup.overlap - minmax(biflup.overlap)[1,])/(minmax(biflup.overlap)[2,] - minmax(biflup.overlap)[1,])  
+  
+  biflup.idmnormlist[[i]] = biflup.idmnorm
+  biflup.overlapnormlist[[i]] = biflup.overlapnorm
   
   ## Step 4a: Use modEvA::AUC to get AUC
   biflup.overlap.auc <- AUC(obs = biflup.test, pred = biflup.overlapnorm)
@@ -686,6 +852,7 @@ save(biflup.idmlist, file = "biflup-idms.RData")
 ```
 
 ```{r biflup ensemble}
+# Raw
 biflup.overlap.ensemble <- raster(mean(rast(biflup.overlaplist[c(1:100)])))
 biflup.overlap.spdf <- as(biflup.overlap.ensemble, "SpatialPixelsDataFrame")
 biflup.overlap.df <- as.data.frame(biflup.overlap.spdf)
@@ -709,6 +876,85 @@ biflup.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/biflup-idm.png", biflup.idm.plot, width = 6, height = 4, units = "in")
+
+
+# Normalized
+biflup.overlapnorm.ensemble <- raster(mean(rast(biflup.overlapnormlist[c(1:100)])))
+biflup.overlapnorm.spdf <- as(biflup.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+biflup.overlapnorm.df <- as.data.frame(biflup.overlapnorm.spdf)
+
+biflup.overlapnorm.plot <- ggplot() +
+  geom_tile(data = biflup.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/biflup-overlapnorm.png", biflup.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+biflup.idmnorm.ensemble <- raster(mean(rast(biflup.idmnormlist[c(1:100)])))
+biflup.idmnorm.spdf <- as(biflup.idmnorm.ensemble, "SpatialPixelsDataFrame")
+biflup.idmnorm.df <- as.data.frame(biflup.idmnorm.spdf)
+
+biflup.idmnorm.plot <- ggplot() +
+  geom_tile(data = biflup.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/biflup-idmnorm.png", biflup.idmnorm.plot, width = 6, height = 4, units = "in")
+
+
+# Threshold
+biflup.overlap.tstar <- mean((biflup.evaldf %>% filter(model == "overlap"))$tstar)
+biflup.overlap.threshensemble <- clamp(biflup.overlapnorm.ensemble, lower = biflup.overlap.tstar, upper = 1, values = T)
+biflup.overlap.threshensemble[biflup.overlap.threshensemble > biflup.overlap.tstar] = 1
+biflup.overlap.threshensemble[biflup.overlap.threshensemble <= biflup.overlap.tstar] = 0
+
+biflup.idm.tstar <- mean((biflup.evaldf %>% filter(model == "IDM"))$tstar)
+biflup.idm.threshensemble <- clamp(biflup.idmnorm.ensemble, lower = biflup.idm.tstar, upper = 1, values = T)
+biflup.idm.threshensemble[biflup.idm.threshensemble > biflup.idm.tstar] = 10
+biflup.idm.threshensemble[biflup.idm.threshensemble <= biflup.idm.tstar] = 0
+
+biflup.threshold <- biflup.overlap.threshensemble + biflup.idm.threshensemble
+biflup.thresh.spdf <- as(biflup.threshold, "SpatialPixelsDataFrame")
+biflup.thresh.df <- as.data.frame(biflup.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+biflup.thresh.plot <- ggplot() +
+  geom_tile(data = biflup.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/biflup-threshold.png", biflup.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(biflup.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(biflup.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "biflup",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Penstemon
@@ -726,6 +972,8 @@ bifpen <- bbna %>%
 ```{r bifpen maxent for loop, message = F, eval = T, results = "hide"}
 bifpen.overlaplist <- vector(mode = "list", length = 100)
 bifpen.idmlist <- vector(mode = "list", length = 100)
+bifpen.overlapnormlist <- vector(mode = "list", length = 100)
+bifpen.idmnormlist <- vector(mode = "list", length = 100)
 bifpen.overlapthresh <- vector(mode = "list", length = 100)
 bifpen.idmthresh <- vector(mode = "list", length = 100)
 
@@ -800,12 +1048,15 @@ for(i in 1:100){
   bifpen.idm <- as(dismo::predict(bifpen.maxent, stack(bioclim)), "SpatRaster")
   bifpen.idmlist[[i]] = bifpen.idm
   
-  
+
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   bifpen.idmnorm = (bifpen.idm - minmax(bifpen.idm)[1,])/(minmax(bifpen.idm)[2,] - minmax(bifpen.idm)[1,])
   bifpen.overlapnorm = (bifpen.overlap - minmax(bifpen.overlap)[1,])/(minmax(bifpen.overlap)[2,] - minmax(bifpen.overlap)[1,])
+  
+  bifpen.idmnormlist[[i]] = bifpen.idmnorm
+  bifpen.overlapnormlist[[i]] = bifpen.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   bifpen.overlap.auc <- AUC(obs = bifpen.test, pred = bifpen.overlapnorm)
@@ -883,11 +1134,12 @@ for(i in 1:100){
 write.csv(bifpen.thresholddf, file = "completed-evals/bifpen-threshold.csv")
 write.csv(bifpen.evaldf, file = "completed-evals/bifpen-eval.csv")
 # write.csv(bifpen.varimpdf, file = "completed-evals/bifpen-varimport.csv")
-save(biflup.overlaplist, file = "biflup-overlaps.RData")
-save(biflup.idmlist, file = "biflup-idms.RData")
+save(bifpen.overlaplist, file = "bifpen-overlaps.RData")
+save(bifpen.idmlist, file = "bifpen-idms.RData")
 ```
 
 ```{r bifpen ensemble}
+# Raw
 bifpen.overlap.ensemble <- raster(mean(rast(bifpen.overlaplist[c(1:100)])))
 bifpen.overlap.spdf <- as(bifpen.overlap.ensemble, "SpatialPixelsDataFrame")
 bifpen.overlap.df <- as.data.frame(bifpen.overlap.spdf)
@@ -911,6 +1163,84 @@ bifpen.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/bifpen-idm.png", bifpen.idm.plot, width = 6, height = 4, units = "in")
+ 
+
+# Normalized
+bifpen.overlapnorm.ensemble <- raster(mean(rast(bifpen.overlapnormlist[c(1:100)])))
+bifpen.overlapnorm.spdf <- as(bifpen.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+bifpen.overlapnorm.df <- as.data.frame(bifpen.overlapnorm.spdf)
+
+bifpen.overlapnorm.plot <- ggplot() +
+  geom_tile(data = bifpen.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifpen-overlapnorm.png", bifpen.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+bifpen.idmnorm.ensemble <- raster(mean(rast(bifpen.idmnormlist[c(1:100)])))
+bifpen.idmnorm.spdf <- as(bifpen.idmnorm.ensemble, "SpatialPixelsDataFrame")
+bifpen.idmnorm.df <- as.data.frame(bifpen.idmnorm.spdf)
+
+bifpen.idmnorm.plot <- ggplot() +
+  geom_tile(data = bifpen.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifpen-idmnorm.png", bifpen.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+bifpen.overlap.tstar <- mean((bifpen.evaldf %>% filter(model == "overlap"))$tstar)
+bifpen.overlap.threshensemble <- clamp(bifpen.overlapnorm.ensemble, lower = bifpen.overlap.tstar, upper = 1, values = T)
+bifpen.overlap.threshensemble[bifpen.overlap.threshensemble > bifpen.overlap.tstar] = 1
+bifpen.overlap.threshensemble[bifpen.overlap.threshensemble <= bifpen.overlap.tstar] = 0
+
+bifpen.idm.tstar <- mean((bifpen.evaldf %>% filter(model == "IDM"))$tstar)
+bifpen.idm.threshensemble <- clamp(bifpen.idmnorm.ensemble, lower = bifpen.idm.tstar, upper = 1, values = T)
+bifpen.idm.threshensemble[bifpen.idm.threshensemble > bifpen.idm.tstar] = 10
+bifpen.idm.threshensemble[bifpen.idm.threshensemble <= bifpen.idm.tstar] = 0
+
+bifpen.threshold <- bifpen.overlap.threshensemble + bifpen.idm.threshensemble
+bifpen.thresh.spdf <- as(bifpen.threshold, "SpatialPixelsDataFrame")
+bifpen.thresh.df <- as.data.frame(bifpen.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+bifpen.thresh.plot <- ggplot() +
+  geom_tile(data = bifpen.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/bifpen-threshold.png", bifpen.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(bifpen.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(bifpen.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "bifpen",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Rubus
@@ -927,6 +1257,8 @@ bifrub <- bbna %>%
 ```{r bifrub maxent for loop, message = F, eval = T, results = "hide"}
 bifrub.overlaplist <- vector(mode = "list", length = 100)
 bifrub.idmlist <- vector(mode = "list", length = 100)
+bifrub.overlapnormlist <- vector(mode = "list", length = 100)
+bifrub.idmnormlist <- vector(mode = "list", length = 100)
 bifrub.overlapthresh <- vector(mode = "list", length = 100)
 bifrub.idmthresh <- vector(mode = "list", length = 100)
 
@@ -1002,11 +1334,15 @@ for(i in 1:100){
   bifrub.idmlist[[i]] = bifrub.idm
   
   
+
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   bifrub.idmnorm = (bifrub.idm - minmax(bifrub.idm)[1,])/(minmax(bifrub.idm)[2,] - minmax(bifrub.idm)[1,])
   bifrub.overlapnorm = (bifrub.overlap - minmax(bifrub.overlap)[1,])/(minmax(bifrub.overlap)[2,] - minmax(bifrub.overlap)[1,])
+  
+  bifrub.idmnormlist[[i]] = bifrub.idmnorm
+  bifrub.overlapnormlist[[i]] = bifrub.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   bifrub.overlap.auc <- AUC(obs = bifrub.test, pred = bifrub.overlapnorm)
@@ -1033,7 +1369,7 @@ for(i in 1:100){
 
   bifrub.idm.eval = data.frame(run = i,
                         model = "IDM",
-                        AUC = bifcir.idm.auc$AUC,
+                        AUC = bifrub.idm.auc$AUC,
                         TSS = max(bifrub.idm.tssdf$TSS),
                         tstar = bifrub.idm.tssdf[bifrub.idm.tstar, 1],
                         sens_star = bifrub.idm.tssdf[bifrub.idm.tstar, 4],
@@ -1089,6 +1425,7 @@ save(bifrub.idmlist, file = "bifrub-idms.RData")
 ```
 
 ```{r bifrub ensemble}
+# Raw
 bifrub.overlap.ensemble <- raster(mean(rast(bifrub.overlaplist[c(1:100)])))
 bifrub.overlap.spdf <- as(bifrub.overlap.ensemble, "SpatialPixelsDataFrame")
 bifrub.overlap.df <- as.data.frame(bifrub.overlap.spdf)
@@ -1112,6 +1449,83 @@ bifrub.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/bifrub-idm.png", bifrub.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+bifrub.overlapnorm.ensemble <- raster(mean(rast(bifrub.overlapnormlist[c(1:100)])))
+bifrub.overlapnorm.spdf <- as(bifrub.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+bifrub.overlapnorm.df <- as.data.frame(bifrub.overlapnorm.spdf)
+
+bifrub.overlapnorm.plot <- ggplot() +
+  geom_tile(data = bifrub.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifrub-overlapnorm.png", bifrub.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+bifrub.idmnorm.ensemble <- raster(mean(rast(bifrub.idmnormlist[c(1:100)])))
+bifrub.idmnorm.spdf <- as(bifrub.idmnorm.ensemble, "SpatialPixelsDataFrame")
+bifrub.idmnorm.df <- as.data.frame(bifrub.idmnorm.spdf)
+
+bifrub.idmnorm.plot <- ggplot() +
+  geom_tile(data = bifrub.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/bifrub-idmnorm.png", bifrub.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+bifrub.overlap.tstar <- mean((bifrub.evaldf %>% filter(model == "overlap"))$tstar)
+bifrub.overlap.threshensemble <- clamp(bifrub.overlapnorm.ensemble, lower = bifrub.overlap.tstar, upper = 1, values = T)
+bifrub.overlap.threshensemble[bifrub.overlap.threshensemble > bifrub.overlap.tstar] = 1
+bifrub.overlap.threshensemble[bifrub.overlap.threshensemble <= bifrub.overlap.tstar] = 0
+
+bifrub.idm.tstar <- mean((bifrub.evaldf %>% filter(model == "IDM"))$tstar)
+bifrub.idm.threshensemble <- clamp(bifrub.idmnorm.ensemble, lower = bifrub.idm.tstar, upper = 1, values = T)
+bifrub.idm.threshensemble[bifrub.idm.threshensemble > bifrub.idm.tstar] = 10
+bifrub.idm.threshensemble[bifrub.idm.threshensemble <= bifrub.idm.tstar] = 0
+
+bifrub.threshold <- bifrub.overlap.threshensemble + bifrub.idm.threshensemble
+bifrub.thresh.spdf <- as(bifrub.threshold, "SpatialPixelsDataFrame")
+bifrub.thresh.df <- as.data.frame(bifrub.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+bifrub.thresh.plot <- ggplot() +
+  geom_tile(data = bifrub.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/bifrub-threshold.png", bifrub.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(bifrub.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(bifrub.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "bifrub",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 # Flavifrons
@@ -1129,6 +1543,8 @@ flavcham <- bbna %>%
 ```{r flavcham maxent for loop, message = F, eval = T, results = "hide"}
 flavcham.overlaplist <- vector(mode = "list", length = 100)
 flavcham.idmlist <- vector(mode = "list", length = 100)
+flavcham.overlapnormlist <- vector(mode = "list", length = 100)
+flavcham.idmnormlist <- vector(mode = "list", length = 100)
 flavcham.overlapthresh <- vector(mode = "list", length = 100)
 flavcham.idmthresh <- vector(mode = "list", length = 100)
 
@@ -1204,11 +1620,13 @@ for(i in 1:100){
   flavcham.idmlist[[i]] = flavcham.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   flavcham.idmnorm = (flavcham.idm - minmax(flavcham.idm)[1,])/(minmax(flavcham.idm)[2,] - minmax(flavcham.idm)[1,])
   flavcham.overlapnorm = (flavcham.overlap - minmax(flavcham.overlap)[1,])/(minmax(flavcham.overlap)[2,] - minmax(flavcham.overlap)[1,])
+  
+  flavcham.idmnormlist[[i]] = flavcham.idmnorm
+  flavcham.overlapnormlist[[i]] = flavcham.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   flavcham.overlap.auc <- AUC(obs = flavcham.test, pred = flavcham.overlapnorm)
@@ -1290,7 +1708,8 @@ save(flavcham.overlaplist, file = "flavcham-overlaps.RData")
 save(flavcham.idmlist, file = "flavcham-idms.RData")
 ```
 
-```{r flavrub ensemble}
+```{r flavcham ensemble}
+# Raw
 flavcham.overlap.ensemble <- raster(mean(rast(flavcham.overlaplist[c(1:100)])))
 flavcham.overlap.spdf <- as(flavcham.overlap.ensemble, "SpatialPixelsDataFrame")
 flavcham.overlap.df <- as.data.frame(flavcham.overlap.spdf)
@@ -1314,6 +1733,83 @@ flavcham.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/flavcham-idm.png", flavcham.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+flavcham.overlapnorm.ensemble <- raster(mean(rast(flavcham.overlapnormlist[c(1:100)])))
+flavcham.overlapnorm.spdf <- as(flavcham.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+flavcham.overlapnorm.df <- as.data.frame(flavcham.overlapnorm.spdf)
+
+flavcham.overlapnorm.plot <- ggplot() +
+  geom_tile(data = flavcham.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavcham-overlapnorm.png", flavcham.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+flavcham.idmnorm.ensemble <- raster(mean(rast(flavcham.idmnormlist[c(1:100)])))
+flavcham.idmnorm.spdf <- as(flavcham.idmnorm.ensemble, "SpatialPixelsDataFrame")
+flavcham.idmnorm.df <- as.data.frame(flavcham.idmnorm.spdf)
+
+flavcham.idmnorm.plot <- ggplot() +
+  geom_tile(data = flavcham.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavcham-idmnorm.png", flavcham.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+flavcham.overlap.tstar <- mean((flavcham.evaldf %>% filter(model == "overlap"))$tstar)
+flavcham.overlap.threshensemble <- clamp(flavcham.overlapnorm.ensemble, lower = flavcham.overlap.tstar, upper = 1, values = T)
+flavcham.overlap.threshensemble[flavcham.overlap.threshensemble > flavcham.overlap.tstar] = 1
+flavcham.overlap.threshensemble[flavcham.overlap.threshensemble <= flavcham.overlap.tstar] = 0
+
+flavcham.idm.tstar <- mean((flavcham.evaldf %>% filter(model == "IDM"))$tstar)
+flavcham.idm.threshensemble <- clamp(flavcham.idmnorm.ensemble, lower = flavcham.idm.tstar, upper = 1, values = T)
+flavcham.idm.threshensemble[flavcham.idm.threshensemble > flavcham.idm.tstar] = 10
+flavcham.idm.threshensemble[flavcham.idm.threshensemble <= flavcham.idm.tstar] = 0
+
+flavcham.threshold <- flavcham.overlap.threshensemble + flavcham.idm.threshensemble
+flavcham.thresh.spdf <- as(flavcham.threshold, "SpatialPixelsDataFrame")
+flavcham.thresh.df <- as.data.frame(flavcham.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+flavcham.thresh.plot <- ggplot() +
+  geom_tile(data = flavcham.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/flavcham-threshold.png", flavcham.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(flavcham.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(flavcham.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "flavcham",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Cirsium
@@ -1330,6 +1826,8 @@ flavcir <- bbna %>%
 ```{r flavcir maxent for loop, message = F, eval = T, results = "hide"}
 flavcir.overlaplist <- vector(mode = "list", length = 100)
 flavcir.idmlist <- vector(mode = "list", length = 100)
+flavcir.overlapnormlist <- vector(mode = "list", length = 100)
+flavcir.idmnormlist <- vector(mode = "list", length = 100)
 flavcir.overlapthresh <- vector(mode = "list", length = 100)
 flavcir.idmthresh <- vector(mode = "list", length = 100)
 
@@ -1404,12 +1902,13 @@ for(i in 1:100){
   flavcir.idm <- as(dismo::predict(flavcir.maxent, stack(bioclim)), "SpatRaster")
   flavcir.idmlist[[i]] = flavcir.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   flavcir.idmnorm = (flavcir.idm - minmax(flavcir.idm)[1,])/(minmax(flavcir.idm)[2,] - minmax(flavcir.idm)[1,])
   flavcir.overlapnorm = (flavcir.overlap - minmax(flavcir.overlap)[1,])/(minmax(flavcir.overlap)[2,] - minmax(flavcir.overlap)[1,])
+
+  flavcir.idmnormlist[[i]] =flavcir.idmnorm
+  flavcir.overlapnormlist[[i]] =flavcir.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   flavcir.overlap.auc <- AUC(obs = flavcir.test, pred = flavcir.overlapnorm)
@@ -1492,6 +1991,7 @@ save(flavcir.idmlist, file = "flavcir-idms.RData")
 ```
 
 ```{r flavcir ensemble}
+# Raw
 flavcir.overlap.ensemble <- raster(mean(rast(flavcir.overlaplist[c(1:100)])))
 flavcir.overlap.spdf <- as(flavcir.overlap.ensemble, "SpatialPixelsDataFrame")
 flavcir.overlap.df <- as.data.frame(flavcir.overlap.spdf)
@@ -1515,6 +2015,84 @@ flavcir.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/flavcir-idm.png", flavcir.idm.plot, width = 6, height = 4, units = "in")
+
+
+# Normalized
+flavcir.overlapnorm.ensemble <- raster(mean(rast(flavcir.overlapnormlist[c(1:100)])))
+flavcir.overlapnorm.spdf <- as(flavcir.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+flavcir.overlapnorm.df <- as.data.frame(flavcir.overlapnorm.spdf)
+
+flavcir.overlapnorm.plot <- ggplot() +
+  geom_tile(data = flavcir.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavcir-overlapnorm.png", flavcir.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+flavcir.idmnorm.ensemble <- raster(mean(rast(flavcir.idmnormlist[c(1:100)])))
+flavcir.idmnorm.spdf <- as(flavcir.idmnorm.ensemble, "SpatialPixelsDataFrame")
+flavcir.idmnorm.df <- as.data.frame(flavcir.idmnorm.spdf)
+
+flavcir.idmnorm.plot <- ggplot() +
+  geom_tile(data = flavcir.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavcir-idmnorm.png", flavcir.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+flavcir.overlap.tstar <- mean((flavcir.evaldf %>% filter(model == "overlap"))$tstar)
+flavcir.overlap.threshensemble <- clamp(flavcir.overlapnorm.ensemble, lower = flavcir.overlap.tstar, upper = 1, values = T)
+flavcir.overlap.threshensemble[flavcir.overlap.threshensemble > flavcir.overlap.tstar] = 1
+flavcir.overlap.threshensemble[flavcir.overlap.threshensemble <= flavcir.overlap.tstar] = 0
+
+flavcir.idm.tstar <- mean((flavcir.evaldf %>% filter(model == "IDM"))$tstar)
+flavcir.idm.threshensemble <- clamp(flavcir.idmnorm.ensemble, lower = flavcir.idm.tstar, upper = 1, values = T)
+flavcir.idm.threshensemble[flavcir.idm.threshensemble > flavcir.idm.tstar] = 10
+flavcir.idm.threshensemble[flavcir.idm.threshensemble <= flavcir.idm.tstar] = 0
+
+flavcir.threshold <- flavcir.overlap.threshensemble + flavcir.idm.threshensemble
+flavcir.thresh.spdf <- as(flavcir.threshold, "SpatialPixelsDataFrame")
+flavcir.thresh.df <- as.data.frame(flavcir.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+flavcir.thresh.plot <- ggplot() +
+  geom_tile(data = flavcir.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/flavcir-threshold.png", flavcir.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(flavcir.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(flavcir.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "flavcir",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Lupinus
@@ -1532,6 +2110,8 @@ flavlup <- bbna %>%
 ```{r flavlup maxent for loop, message = F, eval = T, results = "hide"}
 flavlup.overlaplist <- vector(mode = "list", length = 100)
 flavlup.idmlist <- vector(mode = "list", length = 100)
+flavlup.overlapnormlist <- vector(mode = "list", length = 100)
+flavlup.idmnormlist <- vector(mode = "list", length = 100)
 flavlup.overlapthresh <- vector(mode = "list", length = 100)
 flavlup.idmthresh <- vector(mode = "list", length = 100)
 
@@ -1606,12 +2186,13 @@ for(i in 1:100){
   flavlup.idm <- as(dismo::predict(flavlup.maxent, stack(bioclim)), "SpatRaster")
   flavlup.idmlist[[i]] = flavlup.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   flavlup.idmnorm = (flavlup.idm - minmax(flavlup.idm)[1,])/(minmax(flavlup.idm)[2,] - minmax(flavlup.idm)[1,])
   flavlup.overlapnorm = (flavlup.overlap - minmax(flavlup.overlap)[1,])/(minmax(flavlup.overlap)[2,] - minmax(flavlup.overlap)[1,])
+  
+  flavlup.idmnormlist[[i]] =flavlup.idmnorm
+  flavlup.overlapnormlist[[i]] =flavlup.overlapnorm
   
     ## Step 4b: Use modEvA::AUC to get AUC
   flavlup.overlap.auc <- AUC(obs = flavlup.test, pred = flavlup.overlapnorm)
@@ -1694,6 +2275,7 @@ save(flavlup.idmlist, file = "flavlup-idms.RData")
 ```
 
 ```{r flavlup ensemble}
+# Raw
 flavlup.overlap.ensemble <- raster(mean(rast(flavlup.overlaplist[c(1:100)])))
 flavlup.overlap.spdf <- as(flavlup.overlap.ensemble, "SpatialPixelsDataFrame")
 flavlup.overlap.df <- as.data.frame(flavlup.overlap.spdf)
@@ -1717,6 +2299,84 @@ flavlup.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/flavlup-idm.png", flavlup.idm.plot, width = 6, height = 4, units = "in")
+  
+# Normalized
+flavlup.overlapnorm.ensemble <- raster(mean(rast(flavlup.overlapnormlist[c(1:100)])))
+flavlup.overlapnorm.spdf <- as(flavlup.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+flavlup.overlapnorm.df <- as.data.frame(flavlup.overlapnorm.spdf)
+
+flavlup.overlapnorm.plot <- ggplot() +
+  geom_tile(data = flavlup.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavlup-overlapnorm.png", flavlup.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+flavlup.idmnorm.ensemble <- raster(mean(rast(flavlup.idmnormlist[c(1:100)])))
+flavlup.idmnorm.spdf <- as(flavlup.idmnorm.ensemble, "SpatialPixelsDataFrame")
+flavlup.idmnorm.df <- as.data.frame(flavlup.idmnorm.spdf)
+
+flavlup.idmnorm.plot <- ggplot() +
+  geom_tile(data = flavlup.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavlup-idmnorm.png", flavlup.idmnorm.plot, width = 6, height = 4, units = "in")
+
+
+# Threshold
+flavlup.overlap.tstar <- mean((flavlup.evaldf %>% filter(model == "overlap"))$tstar)
+flavlup.overlap.threshensemble <- clamp(flavlup.overlapnorm.ensemble, lower = flavlup.overlap.tstar, upper = 1, values = T)
+flavlup.overlap.threshensemble[flavlup.overlap.threshensemble > flavlup.overlap.tstar] = 1
+flavlup.overlap.threshensemble[flavlup.overlap.threshensemble <= flavlup.overlap.tstar] = 0
+
+flavlup.idm.tstar <- mean((flavlup.evaldf %>% filter(model == "IDM"))$tstar)
+flavlup.idm.threshensemble <- clamp(flavlup.idmnorm.ensemble, lower = flavlup.idm.tstar, upper = 1, values = T)
+flavlup.idm.threshensemble[flavlup.idm.threshensemble > flavlup.idm.tstar] = 10
+flavlup.idm.threshensemble[flavlup.idm.threshensemble <= flavlup.idm.tstar] = 0
+
+flavlup.threshold <- flavlup.overlap.threshensemble + flavlup.idm.threshensemble
+flavlup.thresh.spdf <- as(flavlup.threshold, "SpatialPixelsDataFrame")
+flavlup.thresh.df <- as.data.frame(flavlup.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+flavlup.thresh.plot <- ggplot() +
+  geom_tile(data = flavlup.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/flavlup-threshold.png", flavlup.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(flavlup.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(flavlup.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "flavlup",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Penstemon
@@ -1733,6 +2393,8 @@ flavpen <- bbna %>%
 ```{r flavpen maxent for loop, message = F, eval = T, results = "hide"}
 flavpen.overlaplist <- vector(mode = "list", length = 100)
 flavpen.idmlist <- vector(mode = "list", length = 100)
+flavpen.overlapnormlist <- vector(mode = "list", length = 100)
+flavpen.idmnormlist <- vector(mode = "list", length = 100)
 flavpen.overlapthresh <- vector(mode = "list", length = 100)
 flavpen.idmthresh <- vector(mode = "list", length = 100)
 
@@ -1807,12 +2469,13 @@ for(i in 1:100){
   flavpen.idm <- as(dismo::predict(flavpen.maxent, stack(bioclim)), "SpatRaster")
   flavpen.idmlist[[i]] = flavpen.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters for RMSE calculation
   flavpen.idmnorm = (flavpen.idm - minmax(flavpen.idm)[1,])/(minmax(flavpen.idm)[2,] - minmax(flavpen.idm)[1,])
   flavpen.overlapnorm = (flavpen.overlap - minmax(flavpen.overlap)[1,])/(minmax(flavpen.overlap)[2,] - minmax(flavpen.overlap)[1,])
+  
+  flavpen.idmnormlist[[i]] =flavpen.idmnorm
+  flavpen.overlapnormlist[[i]] =flavpen.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   flavpen.overlap.auc <- AUC(obs = flavpen.test, pred = flavpen.overlapnorm)
@@ -1895,6 +2558,7 @@ save(flavpen.idmlist, file = "flavpen-idms.RData")
 ```
 
 ```{r flavpen ensemble}
+# Raw
 flavpen.overlap.ensemble <- raster(mean(rast(flavpen.overlaplist[c(1:100)])))
 flavpen.overlap.spdf <- as(flavpen.overlap.ensemble, "SpatialPixelsDataFrame")
 flavpen.overlap.df <- as.data.frame(flavpen.overlap.spdf)
@@ -1918,6 +2582,84 @@ flavpen.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/flavpen-idm.png", flavpen.idm.plot, width = 6, height = 4, units = "in")
+
+
+# Normalized
+flavpen.overlapnorm.ensemble <- raster(mean(rast(flavpen.overlapnormlist[c(1:100)])))
+flavpen.overlapnorm.spdf <- as(flavpen.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+flavpen.overlapnorm.df <- as.data.frame(flavpen.overlapnorm.spdf)
+
+flavpen.overlapnorm.plot <- ggplot() +
+  geom_tile(data = flavpen.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavpen-overlapnorm.png", flavpen.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+flavpen.idmnorm.ensemble <- raster(mean(rast(flavpen.idmnormlist[c(1:100)])))
+flavpen.idmnorm.spdf <- as(flavpen.idmnorm.ensemble, "SpatialPixelsDataFrame")
+flavpen.idmnorm.df <- as.data.frame(flavpen.idmnorm.spdf)
+
+flavpen.idmnorm.plot <- ggplot() +
+  geom_tile(data = flavpen.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavpen-idmnorm.png", flavpen.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+flavpen.overlap.tstar <- mean((flavpen.evaldf %>% filter(model == "overlap"))$tstar)
+flavpen.overlap.threshensemble <- clamp(flavpen.overlapnorm.ensemble, lower = flavpen.overlap.tstar, upper = 1, values = T)
+flavpen.overlap.threshensemble[flavpen.overlap.threshensemble > flavpen.overlap.tstar] = 1
+flavpen.overlap.threshensemble[flavpen.overlap.threshensemble <= flavpen.overlap.tstar] = 0
+
+flavpen.idm.tstar <- mean((flavpen.evaldf %>% filter(model == "IDM"))$tstar)
+flavpen.idm.threshensemble <- clamp(flavpen.idmnorm.ensemble, lower = flavpen.idm.tstar, upper = 1, values = T)
+flavpen.idm.threshensemble[flavpen.idm.threshensemble > flavpen.idm.tstar] = 10
+flavpen.idm.threshensemble[flavpen.idm.threshensemble <= flavpen.idm.tstar] = 0
+
+flavpen.threshold <- flavpen.overlap.threshensemble + flavpen.idm.threshensemble
+flavpen.thresh.spdf <- as(flavpen.threshold, "SpatialPixelsDataFrame")
+flavpen.thresh.df <- as.data.frame(flavpen.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+flavpen.thresh.plot <- ggplot() +
+  geom_tile(data = flavpen.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/flavpen-threshold.png", flavpen.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(flavpen.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(flavpen.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "flavpen",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Rubus
@@ -1934,6 +2676,8 @@ flavrub <- bbna %>%
 ```{r flavrub maxent for loop, message = F}
 flavrub.overlaplist <- vector(mode = "list", length = 100)
 flavrub.idmlist <- vector(mode = "list", length = 100)
+flavrub.overlapnormlist <- vector(mode = "list", length = 100)
+flavrub.idmnormlist <- vector(mode = "list", length = 100)
 flavrub.overlapthresh <- vector(mode = "list", length = 100)
 flavrub.idmthresh <- vector(mode = "list", length = 100)
 
@@ -2008,12 +2752,13 @@ for(i in 1:100){
   flavrub.idm <- as(dismo::predict(flavrub.maxent, stack(bioclim)), "SpatRaster")
   flavrub.idmlist[[i]] = flavrub.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   flavrub.idmnorm = (flavrub.idm - minmax(flavrub.idm)[1,])/(minmax(flavrub.idm)[2,] - minmax(flavrub.idm)[1,])
   flavrub.overlapnorm = (flavrub.overlap - minmax(flavrub.overlap)[1,])/(minmax(flavrub.overlap)[2,] - minmax(flavrub.overlap)[1,])
+  
+  flavrub.idmnormlist[[i]] =flavrub.idmnorm
+  flavrub.overlapnormlist[[i]] =flavrub.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   flavrub.overlap.auc <- AUC(obs = flavrub.test, pred = flavrub.overlapnorm)
@@ -2096,6 +2841,7 @@ save(flavrub.idmlist, file = "flavrub-idms.RData")
 ```
 
 ```{r flavrub ensemble}
+# Raw
 flavrub.overlap.ensemble <- raster(mean(rast(flavrub.overlaplist[c(1:100)])))
 flavrub.overlap.spdf <- as(flavrub.overlap.ensemble, "SpatialPixelsDataFrame")
 flavrub.overlap.df <- as.data.frame(flavrub.overlap.spdf)
@@ -2119,6 +2865,83 @@ flavrub.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/flavrub-idm.png", flavrub.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+flavrub.overlapnorm.ensemble <- raster(mean(rast(flavrub.overlapnormlist[c(1:100)])))
+flavrub.overlapnorm.spdf <- as(flavrub.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+flavrub.overlapnorm.df <- as.data.frame(flavrub.overlapnorm.spdf)
+
+flavrub.overlapnorm.plot <- ggplot() +
+  geom_tile(data = flavrub.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavrub-overlapnorm.png", flavrub.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+flavrub.idmnorm.ensemble <- raster(mean(rast(flavrub.idmnormlist[c(1:100)])))
+flavrub.idmnorm.spdf <- as(flavrub.idmnorm.ensemble, "SpatialPixelsDataFrame")
+flavrub.idmnorm.df <- as.data.frame(flavrub.idmnorm.spdf)
+
+flavrub.idmnorm.plot <- ggplot() +
+  geom_tile(data = flavrub.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/flavrub-idmnorm.png", flavrub.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+flavrub.overlap.tstar <- mean((flavrub.evaldf %>% filter(model == "overlap"))$tstar)
+flavrub.overlap.threshensemble <- clamp(flavrub.overlapnorm.ensemble, lower = flavrub.overlap.tstar, upper = 1, values = T)
+flavrub.overlap.threshensemble[flavrub.overlap.threshensemble > flavrub.overlap.tstar] = 1
+flavrub.overlap.threshensemble[flavrub.overlap.threshensemble <= flavrub.overlap.tstar] = 0
+
+flavrub.idm.tstar <- mean((flavrub.evaldf %>% filter(model == "IDM"))$tstar)
+flavrub.idm.threshensemble <- clamp(flavrub.idmnorm.ensemble, lower = flavrub.idm.tstar, upper = 1, values = T)
+flavrub.idm.threshensemble[flavrub.idm.threshensemble > flavrub.idm.tstar] = 10
+flavrub.idm.threshensemble[flavrub.idm.threshensemble <= flavrub.idm.tstar] = 0
+
+flavrub.threshold <- flavrub.overlap.threshensemble + flavrub.idm.threshensemble
+flavrub.thresh.spdf <- as(flavrub.threshold, "SpatialPixelsDataFrame")
+flavrub.thresh.df <- as.data.frame(flavrub.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+flavrub.thresh.plot <- ggplot() +
+  geom_tile(data = flavrub.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/flavrub-threshold.png", flavrub.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(flavrub.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(flavrub.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "flavrub",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 # Mixtus
@@ -2137,6 +2960,8 @@ mixcham <- bbna %>%
 ```{r mixcham maxent for loop, message = F}
 mixcham.overlaplist <- vector(mode = "list", length = 100)
 mixcham.idmlist <- vector(mode = "list", length = 100)
+mixcham.overlapnormlist <- vector(mode = "list", length = 100)
+mixcham.idmnormlist <- vector(mode = "list", length = 100)
 mixcham.overlapthresh <- vector(mode = "list", length = 100)
 mixcham.idmthresh <- vector(mode = "list", length = 100)
 
@@ -2211,12 +3036,13 @@ for(i in 1:100){
   mixcham.idm <- as(dismo::predict(mixcham.maxent, stack(bioclim)), "SpatRaster")
   mixcham.idmlist[[i]] = mixcham.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   mixcham.idmnorm = (mixcham.idm - minmax(mixcham.idm)[1,])/(minmax(mixcham.idm)[2,] - minmax(mixcham.idm)[1,])
   mixcham.overlapnorm = (mixcham.overlap - minmax(mixcham.overlap)[1,])/(minmax(mixcham.overlap)[2,] - minmax(mixcham.overlap)[1,])
+  
+  mixcham.idmnormlist[[i]] = mixcham.idmnorm
+  mixcham.overlapnormlist[[i]] = mixcham.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   mixcham.overlap.auc <- AUC(obs = mixcham.test, pred = mixcham.overlapnorm)
@@ -2299,6 +3125,7 @@ save(mixcham.idmlist, file = "mixcham-idms.RData")
 ```
 
 ```{r mixcham ensemble}
+# Raw
 mixcham.overlap.ensemble <- raster(mean(rast(mixcham.overlaplist[c(1:100)])))
 mixcham.overlap.spdf <- as(mixcham.overlap.ensemble, "SpatialPixelsDataFrame")
 mixcham.overlap.df <- as.data.frame(mixcham.overlap.spdf)
@@ -2322,6 +3149,85 @@ mixcham.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/mixcham-idm.png", mixcham.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+mixcham.overlapnorm.ensemble <- raster(mean(rast(mixcham.overlapnormlist[c(1:100)])))
+mixcham.overlapnorm.spdf <- as(mixcham.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+mixcham.overlapnorm.df <- as.data.frame(mixcham.overlapnorm.spdf)
+
+mixcham.overlapnorm.plot <- ggplot() +
+  geom_tile(data = mixcham.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixcham-overlapnorm.png", mixcham.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+mixcham.idmnorm.ensemble <- raster(mean(rast(mixcham.idmnormlist[c(1:100)])))
+mixcham.idmnorm.spdf <- as(mixcham.idmnorm.ensemble, "SpatialPixelsDataFrame")
+mixcham.idmnorm.df <- as.data.frame(mixcham.idmnorm.spdf)
+
+mixcham.idmnorm.plot <- ggplot() +
+  geom_tile(data = mixcham.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixcham-idmnorm.png", mixcham.idmnorm.plot, width = 6, height = 4, units = "in")
+
+
+# Threshold
+mixcham.overlap.tstar <- mean((mixcham.evaldf %>% filter(model == "overlap"))$tstar)
+mixcham.overlap.threshensemble <- clamp(mixcham.overlapnorm.ensemble, lower = mixcham.overlap.tstar, upper = 1, values = T)
+mixcham.overlap.threshensemble[mixcham.overlap.threshensemble > mixcham.overlap.tstar] = 1
+mixcham.overlap.threshensemble[mixcham.overlap.threshensemble <= mixcham.overlap.tstar] = 0
+
+mixcham.idm.tstar <- mean((mixcham.evaldf %>% filter(model == "IDM"))$tstar)
+mixcham.idm.threshensemble <- clamp(mixcham.idmnorm.ensemble, lower = mixcham.idm.tstar, upper = 1, values = T)
+mixcham.idm.threshensemble[mixcham.idm.threshensemble > mixcham.idm.tstar] = 10
+mixcham.idm.threshensemble[mixcham.idm.threshensemble <= mixcham.idm.tstar] = 0
+
+mixcham.threshold <- mixcham.overlap.threshensemble + mixcham.idm.threshensemble
+mixcham.thresh.spdf <- as(mixcham.threshold, "SpatialPixelsDataFrame")
+mixcham.thresh.df <- as.data.frame(mixcham.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+mixcham.thresh.plot <- ggplot() +
+  geom_tile(data = mixcham.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/mixcham-threshold.png", mixcham.thresh.plot, width = 6, height = 4, units = "in")
+
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(mixcham.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(mixcham.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "mixcham",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Cirsium
@@ -2339,6 +3245,8 @@ mixcir <- bbna %>%
 ```{r mixcir maxent for loop, message = F, eval = T, results = "hide"}
 mixcir.overlaplist <- vector(mode = "list", length = 100)
 mixcir.idmlist <- vector(mode = "list", length = 100)
+mixcir.overlapnormlist <- vector(mode = "list", length = 100)
+mixcir.idmnormlist <- vector(mode = "list", length = 100)
 mixcir.overlapthresh <- vector(mode = "list", length = 100)
 mixcir.idmthresh <- vector(mode = "list", length = 100)
 
@@ -2376,7 +3284,7 @@ for(i in 1:100){
   cir.test <- cir.longlat[cir.fold == 1,]
   cir.train <- cir.longlat[cir.fold != 1,]
   
-  mixcir.longlat <- mixcham %>%
+  mixcir.longlat <- mixcir %>%
   dplyr::select(longitude, latitude) %>%
   as.data.frame(.)
   mixcir.fold <- kfold(mixcir.longlat, k = 5)
@@ -2413,12 +3321,13 @@ for(i in 1:100){
   mixcir.idm <- as(dismo::predict(mixcir.maxent, stack(bioclim)), "SpatRaster")
   mixcir.idmlist[[i]] = mixcir.idm
   
-  
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   mixcir.idmnorm = (mixcir.idm - minmax(mixcir.idm)[1,])/(minmax(mixcir.idm)[2,] - minmax(mixcir.idm)[1,])
   mixcir.overlapnorm = (mixcir.overlap - minmax(mixcir.overlap)[1,])/(minmax(mixcir.overlap)[2,] - minmax(mixcir.overlap)[1,])
+  
+  mixcir.idmnormlist[[i]] = mixcir.idmnorm
+  mixcir.overlapnormlist[[i]] = mixcir.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   mixcir.overlap.auc <- AUC(obs = mixcir.test, pred = mixcir.overlapnorm)
@@ -2502,6 +3411,7 @@ save(mixcir.idmlist, file = "mixcir-idms.RData")
 ```
 
 ```{r mixcir ensemble}
+# Raw
 mixcir.overlap.ensemble <- raster(mean(rast(mixcir.overlaplist[c(1:100)])))
 mixcir.overlap.spdf <- as(mixcir.overlap.ensemble, "SpatialPixelsDataFrame")
 mixcir.overlap.df <- as.data.frame(mixcir.overlap.spdf)
@@ -2525,6 +3435,83 @@ mixcir.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/mixcir-idm.png", mixcir.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+mixcir.overlapnorm.ensemble <- raster(mean(rast(mixcir.overlapnormlist[c(1:100)])))
+mixcir.overlapnorm.spdf <- as(mixcir.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+mixcir.overlapnorm.df <- as.data.frame(mixcir.overlapnorm.spdf)
+
+mixcir.overlapnorm.plot <- ggplot() +
+  geom_tile(data = mixcir.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixcir-overlapnorm.png", mixcir.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+mixcir.idmnorm.ensemble <- raster(mean(rast(mixcir.idmnormlist[c(1:100)])))
+mixcir.idmnorm.spdf <- as(mixcir.idmnorm.ensemble, "SpatialPixelsDataFrame")
+mixcir.idmnorm.df <- as.data.frame(mixcir.idmnorm.spdf)
+
+mixcir.idmnorm.plot <- ggplot() +
+  geom_tile(data = mixcir.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixcir-idmnorm.png", mixcir.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+mixcir.overlap.tstar <- mean((mixcir.evaldf %>% filter(model == "overlap"))$tstar)
+mixcir.overlap.threshensemble <- clamp(mixcir.overlapnorm.ensemble, lower = mixcir.overlap.tstar, upper = 1, values = T)
+mixcir.overlap.threshensemble[mixcir.overlap.threshensemble > mixcir.overlap.tstar] = 1
+mixcir.overlap.threshensemble[mixcir.overlap.threshensemble <= mixcir.overlap.tstar] = 0
+
+mixcir.idm.tstar <- mean((mixcir.evaldf %>% filter(model == "IDM"))$tstar)
+mixcir.idm.threshensemble <- clamp(mixcir.idmnorm.ensemble, lower = mixcir.idm.tstar, upper = 1, values = T)
+mixcir.idm.threshensemble[mixcir.idm.threshensemble > mixcir.idm.tstar] = 10
+mixcir.idm.threshensemble[mixcir.idm.threshensemble <= mixcir.idm.tstar] = 0
+
+mixcir.threshold <- mixcir.overlap.threshensemble + mixcir.idm.threshensemble
+mixcir.thresh.spdf <- as(mixcir.threshold, "SpatialPixelsDataFrame")
+mixcir.thresh.df <- as.data.frame(mixcir.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+mixcir.thresh.plot <- ggplot() +
+  geom_tile(data = mixcir.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/mixcir-threshold.png", mixcir.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(mixcir.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(mixcir.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "mixcir",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Lupinus
@@ -2542,6 +3529,8 @@ mixlup <- bbna %>%
 ```{r mixlup maxent for loop, message = F, eval = T, results = "hide"}
 mixlup.overlaplist <- vector(mode = "list", length = 100)
 mixlup.idmlist <- vector(mode = "list", length = 100)
+mixlup.overlapnormlist <- vector(mode = "list", length = 100)
+mixlup.idmnormlist <- vector(mode = "list", length = 100)
 mixlup.overlapthresh <- vector(mode = "list", length = 100)
 mixlup.idmthresh <- vector(mode = "list", length = 100)
 
@@ -2616,12 +3605,15 @@ for(i in 1:100){
   mixlup.idm <- as(dismo::predict(mixlup.maxent, stack(bioclim)), "SpatRaster")
   mixlup.idmlist[[i]] = mixlup.idm
   
-  
+    
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   mixlup.idmnorm = (mixlup.idm - minmax(mixlup.idm)[1,])/(minmax(mixlup.idm)[2,] - minmax(mixlup.idm)[1,])
   mixlup.overlapnorm = (mixlup.overlap - minmax(mixlup.overlap)[1,])/(minmax(mixlup.overlap)[2,] - minmax(mixlup.overlap)[1,])
+  
+  mixlup.idmnormlist[[i]] = mixlup.idmnorm
+  mixlup.overlapnormlist[[i]] = mixlup.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   mixlup.overlap.auc <- AUC(obs = mixlup.test, pred = mixlup.overlapnorm)
@@ -2704,6 +3696,7 @@ save(mixlup.idmlist, file = "mixlup-idms.RData")
 ```
 
 ```{r mixlup ensemble}
+# Raw
 mixlup.overlap.ensemble <- raster(mean(rast(mixlup.overlaplist[c(1:100)])))
 mixlup.overlap.spdf <- as(mixlup.overlap.ensemble, "SpatialPixelsDataFrame")
 mixlup.overlap.df <- as.data.frame(mixlup.overlap.spdf)
@@ -2727,6 +3720,83 @@ mixlup.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/mixlup-idm.png", mixlup.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+mixlup.overlapnorm.ensemble <- raster(mean(rast(mixlup.overlapnormlist[c(1:100)])))
+mixlup.overlapnorm.spdf <- as(mixlup.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+mixlup.overlapnorm.df <- as.data.frame(mixlup.overlapnorm.spdf)
+
+mixlup.overlapnorm.plot <- ggplot() +
+  geom_tile(data = mixlup.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixlup-overlapnorm.png", mixlup.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+mixlup.idmnorm.ensemble <- raster(mean(rast(mixlup.idmnormlist[c(1:100)])))
+mixlup.idmnorm.spdf <- as(mixlup.idmnorm.ensemble, "SpatialPixelsDataFrame")
+mixlup.idmnorm.df <- as.data.frame(mixlup.idmnorm.spdf)
+
+mixlup.idmnorm.plot <- ggplot() +
+  geom_tile(data = mixlup.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixlup-idmnorm.png", mixlup.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+mixlup.overlap.tstar <- mean((mixlup.evaldf %>% filter(model == "overlap"))$tstar)
+mixlup.overlap.threshensemble <- clamp(mixlup.overlapnorm.ensemble, lower = mixlup.overlap.tstar, upper = 1, values = T)
+mixlup.overlap.threshensemble[mixlup.overlap.threshensemble > mixlup.overlap.tstar] = 1
+mixlup.overlap.threshensemble[mixlup.overlap.threshensemble <= mixlup.overlap.tstar] = 0
+
+mixlup.idm.tstar <- mean((mixlup.evaldf %>% filter(model == "IDM"))$tstar)
+mixlup.idm.threshensemble <- clamp(mixlup.idmnorm.ensemble, lower = mixlup.idm.tstar, upper = 1, values = T)
+mixlup.idm.threshensemble[mixlup.idm.threshensemble > mixlup.idm.tstar] = 10
+mixlup.idm.threshensemble[mixlup.idm.threshensemble <= mixlup.idm.tstar] = 0
+
+mixlup.threshold <- mixlup.overlap.threshensemble + mixlup.idm.threshensemble
+mixlup.thresh.spdf <- as(mixlup.threshold, "SpatialPixelsDataFrame")
+mixlup.thresh.df <- as.data.frame(mixlup.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+mixlup.thresh.plot <- ggplot() +
+  geom_tile(data = mixlup.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/mixlup-threshold.png", mixlup.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(mixlup.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(mixlup.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "mixlup",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Penstemon
@@ -2744,6 +3814,8 @@ mixpen <- bbna %>%
 ```{r mixpen maxent for loop, message = F, eval = T, results = "hide"}
 mixpen.overlaplist <- vector(mode = "list", length = 100)
 mixpen.idmlist <- vector(mode = "list", length = 100)
+mixpen.overlapnormlist <- vector(mode = "list", length = 100)
+mixpen.idmnormlist <- vector(mode = "list", length = 100)
 mixpen.overlapthresh <- vector(mode = "list", length = 100)
 mixpen.idmthresh <- vector(mode = "list", length = 100)
 
@@ -2819,11 +3891,13 @@ for(i in 1:100){
   mixpen.idmlist[[i]] = mixpen.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters for RMSE calculation
   mixpen.idmnorm = (mixpen.idm - minmax(mixpen.idm)[1,])/(minmax(mixpen.idm)[2,] - minmax(mixpen.idm)[1,])
   mixpen.overlapnorm = (mixpen.overlap - minmax(mixpen.overlap)[1,])/(minmax(mixpen.overlap)[2,] - minmax(mixpen.overlap)[1,])
+  
+  mixpen.idmnormlist[[i]] = mixpen.idmnorm
+  mixpen.overlapnormlist[[i]] = mixpen.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   mixpen.overlap.auc <- AUC(obs = mixpen.test, pred = mixpen.overlapnorm)
@@ -2906,6 +3980,7 @@ save(mixpen.idmlist, file = "mixpen-idms.RData")
 ```
 
 ```{r mixpen ensemble}
+# Raw
 mixpen.overlap.ensemble <- raster(mean(rast(mixpen.overlaplist[c(1:100)])))
 mixpen.overlap.spdf <- as(mixpen.overlap.ensemble, "SpatialPixelsDataFrame")
 mixpen.overlap.df <- as.data.frame(mixpen.overlap.spdf)
@@ -2929,6 +4004,83 @@ mixpen.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/mixpen-idm.png", mixpen.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+mixpen.overlapnorm.ensemble <- raster(mean(rast(mixpen.overlapnormlist[c(1:100)])))
+mixpen.overlapnorm.spdf <- as(mixpen.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+mixpen.overlapnorm.df <- as.data.frame(mixpen.overlapnorm.spdf)
+
+mixpen.overlapnorm.plot <- ggplot() +
+  geom_tile(data = mixpen.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixpen-overlapnorm.png", mixpen.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+mixpen.idmnorm.ensemble <- raster(mean(rast(mixpen.idmnormlist[c(1:100)])))
+mixpen.idmnorm.spdf <- as(mixpen.idmnorm.ensemble, "SpatialPixelsDataFrame")
+mixpen.idmnorm.df <- as.data.frame(mixpen.idmnorm.spdf)
+
+mixpen.idmnorm.plot <- ggplot() +
+  geom_tile(data = mixpen.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixpen-idmnorm.png", mixpen.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+mixpen.overlap.tstar <- mean((mixpen.evaldf %>% filter(model == "overlap"))$tstar)
+mixpen.overlap.threshensemble <- clamp(mixpen.overlapnorm.ensemble, lower = mixpen.overlap.tstar, upper = 1, values = T)
+mixpen.overlap.threshensemble[mixpen.overlap.threshensemble > mixpen.overlap.tstar] = 1
+mixpen.overlap.threshensemble[mixpen.overlap.threshensemble <= mixpen.overlap.tstar] = 0
+
+mixpen.idm.tstar <- mean((mixpen.evaldf %>% filter(model == "IDM"))$tstar)
+mixpen.idm.threshensemble <- clamp(mixpen.idmnorm.ensemble, lower = mixpen.idm.tstar, upper = 1, values = T)
+mixpen.idm.threshensemble[mixpen.idm.threshensemble > mixpen.idm.tstar] = 10
+mixpen.idm.threshensemble[mixpen.idm.threshensemble <= mixpen.idm.tstar] = 0
+
+mixpen.threshold <- mixpen.overlap.threshensemble + mixpen.idm.threshensemble
+mixpen.thresh.spdf <- as(mixpen.threshold, "SpatialPixelsDataFrame")
+mixpen.thresh.df <- as.data.frame(mixpen.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+mixpen.thresh.plot <- ggplot() +
+  geom_tile(data = mixpen.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/mixpen-threshold.png", mixpen.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(mixpen.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(mixpen.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "mixpen",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Rubus
@@ -2946,6 +4098,8 @@ mixrub <- bbna %>%
 ```{r mixrub maxent for loop, message = F, eval = T, results = "hide"}
 mixrub.overlaplist <- vector(mode = "list", length = 100)
 mixrub.idmlist <- vector(mode = "list", length = 100)
+mixrub.overlapnormlist <- vector(mode = "list", length = 100)
+mixrub.idmnormlist <- vector(mode = "list", length = 100)
 mixrub.overlapthresh <- vector(mode = "list", length = 100)
 mixrub.idmthresh <- vector(mode = "list", length = 100)
 
@@ -3019,13 +4173,15 @@ for(i in 1:100){
   
   mixrub.idm <- as(dismo::predict(mixrub.maxent, stack(bioclim)), "SpatRaster")
   mixrub.idmlist[[i]] = mixrub.idm
-  
-  
+
   
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   mixrub.idmnorm = (mixrub.idm - minmax(mixrub.idm)[1,])/(minmax(mixrub.idm)[2,] - minmax(mixrub.idm)[1,])
   mixrub.overlapnorm = (mixrub.overlap - minmax(mixrub.overlap)[1,])/(minmax(mixrub.overlap)[2,] - minmax(mixrub.overlap)[1,])
+  
+  mixrub.idmnormlist[[i]] = mixrub.idmnorm
+  mixrub.overlapnormlist[[i]] = mixrub.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   mixrub.overlap.auc <- AUC(obs = mixrub.test, pred = mixrub.overlapnorm)
@@ -3108,6 +4264,7 @@ save(mixrub.idmlist, file = "mixrub-idms.RData")
 ```
 
 ```{r mixrub ensemble}
+# Raw
 mixrub.overlap.ensemble <- raster(mean(rast(mixrub.overlaplist[c(1:100)])))
 mixrub.overlap.spdf <- as(mixrub.overlap.ensemble, "SpatialPixelsDataFrame")
 mixrub.overlap.df <- as.data.frame(mixrub.overlap.spdf)
@@ -3131,6 +4288,83 @@ mixrub.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/mixrub-idm.png", mixrub.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+mixrub.overlapnorm.ensemble <- raster(mean(rast(mixrub.overlapnormlist[c(1:100)])))
+mixrub.overlapnorm.spdf <- as(mixrub.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+mixrub.overlapnorm.df <- as.data.frame(mixrub.overlapnorm.spdf)
+
+mixrub.overlapnorm.plot <- ggplot() +
+  geom_tile(data = mixrub.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixrub-overlapnorm.png", mixrub.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+mixrub.idmnorm.ensemble <- raster(mean(rast(mixrub.idmnormlist[c(1:100)])))
+mixrub.idmnorm.spdf <- as(mixrub.idmnorm.ensemble, "SpatialPixelsDataFrame")
+mixrub.idmnorm.df <- as.data.frame(mixrub.idmnorm.spdf)
+
+mixrub.idmnorm.plot <- ggplot() +
+  geom_tile(data = mixrub.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/mixrub-idmnorm.png", mixrub.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+mixrub.overlap.tstar <- mean((mixrub.evaldf %>% filter(model == "overlap"))$tstar)
+mixrub.overlap.threshensemble <- clamp(mixrub.overlapnorm.ensemble, lower = mixrub.overlap.tstar, upper = 1, values = T)
+mixrub.overlap.threshensemble[mixrub.overlap.threshensemble > mixrub.overlap.tstar] = 1
+mixrub.overlap.threshensemble[mixrub.overlap.threshensemble <= mixrub.overlap.tstar] = 0
+
+mixrub.idm.tstar <- mean((mixrub.evaldf %>% filter(model == "IDM"))$tstar)
+mixrub.idm.threshensemble <- clamp(mixrub.idmnorm.ensemble, lower = mixrub.idm.tstar, upper = 1, values = T)
+mixrub.idm.threshensemble[mixrub.idm.threshensemble > mixrub.idm.tstar] = 10
+mixrub.idm.threshensemble[mixrub.idm.threshensemble <= mixrub.idm.tstar] = 0
+
+mixrub.threshold <- mixrub.overlap.threshensemble + mixrub.idm.threshensemble
+mixrub.thresh.spdf <- as(mixrub.threshold, "SpatialPixelsDataFrame")
+mixrub.thresh.df <- as.data.frame(mixrub.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+mixrub.thresh.plot <- ggplot() +
+  geom_tile(data = mixrub.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/mixrub-threshold.png", mixrub.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(mixrub.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(mixrub.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "mixrub",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 
@@ -3150,6 +4384,8 @@ voscham <- bbna %>%
 ```{r voscham maxent for loop, message = F, eval = T, results = "hide"}
 voscham.overlaplist <- vector(mode = "list", length = 100)
 voscham.idmlist <- vector(mode = "list", length = 100)
+voscham.overlapnormlist <- vector(mode = "list", length = 100)
+voscham.idmnormlist <- vector(mode = "list", length = 100)
 voscham.overlapthresh <- vector(mode = "list", length = 100)
 voscham.idmthresh <- vector(mode = "list", length = 100)
 
@@ -3225,11 +4461,13 @@ for(i in 1:100){
   voscham.idmlist[[i]] = voscham.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   voscham.idmnorm = (voscham.idm - minmax(voscham.idm)[1,])/(minmax(voscham.idm)[2,] - minmax(voscham.idm)[1,])
   voscham.overlapnorm = (voscham.overlap - minmax(voscham.overlap)[1,])/(minmax(voscham.overlap)[2,] - minmax(voscham.overlap)[1,])
+  
+  voscham.idmnormlist[[i]] = voscham.idmnorm
+  voscham.overlapnormlist[[i]] = voscham.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   voscham.overlap.auc <- AUC(obs = voscham.test, pred = voscham.overlapnorm)
@@ -3312,6 +4550,7 @@ save(voscham.idmlist, file = "voscham-idms.RData")
 ```
 
 ```{r voscham ensemble}
+# Raw
 voscham.overlap.ensemble <- raster(mean(rast(voscham.overlaplist[c(1:100)])))
 voscham.overlap.spdf <- as(voscham.overlap.ensemble, "SpatialPixelsDataFrame")
 voscham.overlap.df <- as.data.frame(voscham.overlap.spdf)
@@ -3335,6 +4574,84 @@ voscham.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/voscham-idm.png", voscham.idm.plot, width = 6, height = 4, units = "in")
+  
+# Normalized
+voscham.overlapnorm.ensemble <- raster(mean(rast(voscham.overlapnormlist[c(1:100)])))
+voscham.overlapnorm.spdf <- as(voscham.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+voscham.overlapnorm.df <- as.data.frame(voscham.overlapnorm.spdf)
+
+voscham.overlapnorm.plot <- ggplot() +
+  geom_tile(data = voscham.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voscham-overlapnorm.png", voscham.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+voscham.idmnorm.ensemble <- raster(mean(rast(voscham.idmnormlist[c(1:100)])))
+voscham.idmnorm.spdf <- as(voscham.idmnorm.ensemble, "SpatialPixelsDataFrame")
+voscham.idmnorm.df <- as.data.frame(voscham.idmnorm.spdf)
+
+voscham.idmnorm.plot <- ggplot() +
+  geom_tile(data = voscham.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voscham-idmnorm.png", voscham.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+voscham.overlap.tstar <- mean((voscham.evaldf %>% filter(model == "overlap"))$tstar)
+voscham.overlap.threshensemble <- clamp(voscham.overlapnorm.ensemble, lower = voscham.overlap.tstar, upper = 1, values = T)
+voscham.overlap.threshensemble[voscham.overlap.threshensemble > voscham.overlap.tstar] = 1
+voscham.overlap.threshensemble[voscham.overlap.threshensemble <= voscham.overlap.tstar] = 0
+
+voscham.idm.tstar <- mean((voscham.evaldf %>% filter(model == "IDM"))$tstar)
+voscham.idm.threshensemble <- clamp(voscham.idmnorm.ensemble, lower = voscham.idm.tstar, upper = 1, values = T)
+voscham.idm.threshensemble[voscham.idm.threshensemble > voscham.idm.tstar] = 10
+voscham.idm.threshensemble[voscham.idm.threshensemble <= voscham.idm.tstar] = 0
+
+voscham.threshold <- voscham.overlap.threshensemble + voscham.idm.threshensemble
+voscham.thresh.spdf <- as(voscham.threshold, "SpatialPixelsDataFrame")
+voscham.thresh.df <- as.data.frame(voscham.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+voscham.thresh.plot <- ggplot() +
+  geom_tile(data = voscham.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/voscham-threshold.png", voscham.thresh.plot, width = 6, height = 4, units = "in")
+
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(voscham.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(voscham.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "voscham",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Cirsium
@@ -3352,6 +4669,8 @@ voscir <- bbna %>%
 ```{r voscir maxent for loop, message = F, eval = T, results = "hide"}
 voscir.overlaplist <- vector(mode = "list", length = 100)
 voscir.idmlist <- vector(mode = "list", length = 100)
+voscir.overlapnormlist <- vector(mode = "list", length = 100)
+voscir.idmnormlist <- vector(mode = "list", length = 100)
 voscir.overlapthresh <- vector(mode = "list", length = 100)
 voscir.idmthresh <- vector(mode = "list", length = 100)
 
@@ -3427,11 +4746,13 @@ for(i in 1:100){
   voscir.idmlist[[i]] = voscir.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters for RMSE calculation
   voscir.idmnorm = (voscir.idm - minmax(voscir.idm)[1,])/(minmax(voscir.idm)[2,] - minmax(voscir.idm)[1,])
   voscir.overlapnorm = (voscir.overlap - minmax(voscir.overlap)[1,])/(minmax(voscir.overlap)[2,] - minmax(voscir.overlap)[1,])
+  
+  voscir.idmnormlist[[i]] = voscir.idmnorm
+  voscir.overlapnormlist[[i]] = voscir.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   voscir.overlap.auc <- AUC(obs = voscir.test, pred = voscir.overlapnorm)
@@ -3514,6 +4835,7 @@ save(voscir.idmlist, file = "voscir-idms.RData")
 ```
 
 ```{r voscir ensemble}
+# Raw
 voscir.overlap.ensemble <- raster(mean(rast(voscir.overlaplist[c(1:100)])))
 voscir.overlap.spdf <- as(voscir.overlap.ensemble, "SpatialPixelsDataFrame")
 voscir.overlap.df <- as.data.frame(voscir.overlap.spdf)
@@ -3537,6 +4859,83 @@ voscir.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/voscir-idm.png", voscir.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+voscir.overlapnorm.ensemble <- raster(mean(rast(voscir.overlapnormlist[c(1:100)])))
+voscir.overlapnorm.spdf <- as(voscir.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+voscir.overlapnorm.df <- as.data.frame(voscir.overlapnorm.spdf)
+
+voscir.overlapnorm.plot <- ggplot() +
+  geom_tile(data = voscir.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voscir-overlapnorm.png", voscir.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+voscir.idmnorm.ensemble <- raster(mean(rast(voscir.idmnormlist[c(1:100)])))
+voscir.idmnorm.spdf <- as(voscir.idmnorm.ensemble, "SpatialPixelsDataFrame")
+voscir.idmnorm.df <- as.data.frame(voscir.idmnorm.spdf)
+
+voscir.idmnorm.plot <- ggplot() +
+  geom_tile(data = voscir.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voscir-idmnorm.png", voscir.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+voscir.overlap.tstar <- mean((voscir.evaldf %>% filter(model == "overlap"))$tstar)
+voscir.overlap.threshensemble <- clamp(voscir.overlapnorm.ensemble, lower = voscir.overlap.tstar, upper = 1, values = T)
+voscir.overlap.threshensemble[voscir.overlap.threshensemble > voscir.overlap.tstar] = 1
+voscir.overlap.threshensemble[voscir.overlap.threshensemble <= voscir.overlap.tstar] = 0
+
+voscir.idm.tstar <- mean((voscir.evaldf %>% filter(model == "IDM"))$tstar)
+voscir.idm.threshensemble <- clamp(voscir.idmnorm.ensemble, lower = voscir.idm.tstar, upper = 1, values = T)
+voscir.idm.threshensemble[voscir.idm.threshensemble > voscir.idm.tstar] = 10
+voscir.idm.threshensemble[voscir.idm.threshensemble <= voscir.idm.tstar] = 0
+
+voscir.threshold <- voscir.overlap.threshensemble + voscir.idm.threshensemble
+voscir.thresh.spdf <- as(voscir.threshold, "SpatialPixelsDataFrame")
+voscir.thresh.df <- as.data.frame(voscir.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+voscir.thresh.plot <- ggplot() +
+  geom_tile(data = voscir.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/voscir-threshold.png", voscir.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(voscir.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(voscir.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "voscir",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Lupinus
@@ -3554,6 +4953,8 @@ voslup <- bbna %>%
 ```{r voslup maxent for loop, message = F}
 voslup.overlaplist <- vector(mode = "list", length = 100)
 voslup.idmlist <- vector(mode = "list", length = 100)
+voslup.overlapnormlist <- vector(mode = "list", length = 100)
+voslup.idmnormlist <- vector(mode = "list", length = 100)
 voslup.overlapthresh <- vector(mode = "list", length = 100)
 voslup.idmthresh <- vector(mode = "list", length = 100)
 
@@ -3629,11 +5030,13 @@ for(i in 1:100){
   voslup.idmlist[[i]] = voslup.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   voslup.idmnorm = (voslup.idm - minmax(voslup.idm)[1,])/(minmax(voslup.idm)[2,] - minmax(voslup.idm)[1,])
   voslup.overlapnorm = (voslup.overlap - minmax(voslup.overlap)[1,])/(minmax(voslup.overlap)[2,] - minmax(voslup.overlap)[1,])
+  
+  voslup.idmnormlist[[i]] = voslup.idmnorm
+  voslup.overlapnormlist[[i]] = voslup.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   voslup.overlap.auc <- AUC(obs = voslup.test, pred = voslup.overlapnorm)
@@ -3716,6 +5119,7 @@ save(voslup.idmlist, file = "voslup-idms.RData")
 ```
 
 ```{r voslup ensemble}
+# Raw
 voslup.overlap.ensemble <- raster(mean(rast(voslup.overlaplist[c(1:100)])))
 voslup.overlap.spdf <- as(voslup.overlap.ensemble, "SpatialPixelsDataFrame")
 voslup.overlap.df <- as.data.frame(voslup.overlap.spdf)
@@ -3739,6 +5143,83 @@ voslup.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/voslup-idm.png", voslup.idm.plot, width = 6, height = 4, units = "in")
+ 
+# Normalized
+voslup.overlapnorm.ensemble <- raster(mean(rast(voslup.overlapnormlist[c(1:100)])))
+voslup.overlapnorm.spdf <- as(voslup.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+voslup.overlapnorm.df <- as.data.frame(voslup.overlapnorm.spdf)
+
+voslup.overlapnorm.plot <- ggplot() +
+  geom_tile(data = voslup.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voslup-overlapnorm.png", voslup.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+voslup.idmnorm.ensemble <- raster(mean(rast(voslup.idmnormlist[c(1:100)])))
+voslup.idmnorm.spdf <- as(voslup.idmnorm.ensemble, "SpatialPixelsDataFrame")
+voslup.idmnorm.df <- as.data.frame(voslup.idmnorm.spdf)
+
+voslup.idmnorm.plot <- ggplot() +
+  geom_tile(data = voslup.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/voslup-idmnorm.png", voslup.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+voslup.overlap.tstar <- mean((voslup.evaldf %>% filter(model == "overlap"))$tstar)
+voslup.overlap.threshensemble <- clamp(voslup.overlapnorm.ensemble, lower = voslup.overlap.tstar, upper = 1, values = T)
+voslup.overlap.threshensemble[voslup.overlap.threshensemble > voslup.overlap.tstar] = 1
+voslup.overlap.threshensemble[voslup.overlap.threshensemble <= voslup.overlap.tstar] = 0
+
+voslup.idm.tstar <- mean((voslup.evaldf %>% filter(model == "IDM"))$tstar)
+voslup.idm.threshensemble <- clamp(voslup.idmnorm.ensemble, lower = voslup.idm.tstar, upper = 1, values = T)
+voslup.idm.threshensemble[voslup.idm.threshensemble > voslup.idm.tstar] = 10
+voslup.idm.threshensemble[voslup.idm.threshensemble <= voslup.idm.tstar] = 0
+
+voslup.threshold <- voslup.overlap.threshensemble + voslup.idm.threshensemble
+voslup.thresh.spdf <- as(voslup.threshold, "SpatialPixelsDataFrame")
+voslup.thresh.df <- as.data.frame(voslup.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+voslup.thresh.plot <- ggplot() +
+  geom_tile(data = voslup.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/voslup-threshold.png", voslup.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(voslup.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(voslup.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "voslup",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Penstemon
@@ -3756,6 +5237,8 @@ vospen <- bbna %>%
 ```{r vospen maxent for loop, message = F}
 vospen.overlaplist <- vector(mode = "list", length = 100)
 vospen.idmlist <- vector(mode = "list", length = 100)
+vospen.overlapnormlist <- vector(mode = "list", length = 100)
+vospen.idmnormlist <- vector(mode = "list", length = 100)
 vospen.overlapthresh <- vector(mode = "list", length = 100)
 vospen.idmthresh <- vector(mode = "list", length = 100)
 
@@ -3831,11 +5314,13 @@ for(i in 1:100){
   vospen.idmlist[[i]] = vospen.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   vospen.idmnorm = (vospen.idm - minmax(vospen.idm)[1,])/(minmax(vospen.idm)[2,] - minmax(vospen.idm)[1,])
   vospen.overlapnorm = (vospen.overlap - minmax(vospen.overlap)[1,])/(minmax(vospen.overlap)[2,] - minmax(vospen.overlap)[1,])
+  
+  vospen.idmnormlist[[i]] = vospen.idmnorm
+  vospen.overlapnormlist[[i]] = vospen.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   vospen.overlap.auc <- AUC(obs = vospen.test, pred = vospen.overlapnorm)
@@ -3918,6 +5403,7 @@ save(vospen.idmlist, file = "vospen-idms.RData")
 ```
 
 ```{r vospen ensemble}
+# Raw
 vospen.overlap.ensemble <- raster(mean(rast(vospen.overlaplist[c(1:100)])))
 vospen.overlap.spdf <- as(vospen.overlap.ensemble, "SpatialPixelsDataFrame")
 vospen.overlap.df <- as.data.frame(vospen.overlap.spdf)
@@ -3941,6 +5427,83 @@ vospen.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/vospen-idm.png", vospen.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+vospen.overlapnorm.ensemble <- raster(mean(rast(vospen.overlapnormlist[c(1:100)])))
+vospen.overlapnorm.spdf <- as(vospen.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+vospen.overlapnorm.df <- as.data.frame(vospen.overlapnorm.spdf)
+
+vospen.overlapnorm.plot <- ggplot() +
+  geom_tile(data = vospen.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/vospen-overlapnorm.png", vospen.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+vospen.idmnorm.ensemble <- raster(mean(rast(vospen.idmnormlist[c(1:100)])))
+vospen.idmnorm.spdf <- as(vospen.idmnorm.ensemble, "SpatialPixelsDataFrame")
+vospen.idmnorm.df <- as.data.frame(vospen.idmnorm.spdf)
+
+vospen.idmnorm.plot <- ggplot() +
+  geom_tile(data = vospen.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/vospen-idmnorm.png", vospen.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+vospen.overlap.tstar <- mean((vospen.evaldf %>% filter(model == "overlap"))$tstar)
+vospen.overlap.threshensemble <- clamp(vospen.overlapnorm.ensemble, lower = vospen.overlap.tstar, upper = 1, values = T)
+vospen.overlap.threshensemble[vospen.overlap.threshensemble > vospen.overlap.tstar] = 1
+vospen.overlap.threshensemble[vospen.overlap.threshensemble <= vospen.overlap.tstar] = 0
+
+vospen.idm.tstar <- mean((vospen.evaldf %>% filter(model == "IDM"))$tstar)
+vospen.idm.threshensemble <- clamp(vospen.idmnorm.ensemble, lower = vospen.idm.tstar, upper = 1, values = T)
+vospen.idm.threshensemble[vospen.idm.threshensemble > vospen.idm.tstar] = 10
+vospen.idm.threshensemble[vospen.idm.threshensemble <= vospen.idm.tstar] = 0
+
+vospen.threshold <- vospen.overlap.threshensemble + vospen.idm.threshensemble
+vospen.thresh.spdf <- as(vospen.threshold, "SpatialPixelsDataFrame")
+vospen.thresh.df <- as.data.frame(vospen.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+vospen.thresh.plot <- ggplot() +
+  geom_tile(data = vospen.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/vospen-threshold.png", vospen.thresh.plot, width = 6, height = 4, units = "in")
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(vospen.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(vospen.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "vospen",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
 
 ## Rubus
@@ -3958,6 +5521,8 @@ vosrub <- bbna %>%
 ```{r vosrub maxent for loop, message = F, eval = T, results = "hide"}
 vosrub.overlaplist <- vector(mode = "list", length = 100)
 vosrub.idmlist <- vector(mode = "list", length = 100)
+vosrub.overlapnormlist <- vector(mode = "list", length = 100)
+vosrub.idmnormlist <- vector(mode = "list", length = 100)
 vosrub.overlapthresh <- vector(mode = "list", length = 100)
 vosrub.idmthresh <- vector(mode = "list", length = 100)
 
@@ -4033,11 +5598,13 @@ for(i in 1:100){
   vosrub.idmlist[[i]] = vosrub.idm
   
   
-  
   # Step 4: Evaluate overlap model and IDM with the same interaction test data
   ## Step 4a: Normalize rasters
   vosrub.idmnorm = (vosrub.idm - minmax(vosrub.idm)[1,])/(minmax(vosrub.idm)[2,] - minmax(vosrub.idm)[1,])
   vosrub.overlapnorm = (vosrub.overlap - minmax(vosrub.overlap)[1,])/(minmax(vosrub.overlap)[2,] - minmax(vosrub.overlap)[1,])
+  
+  vosrub.idmnormlist[[i]] = vosrub.idmnorm
+  vosrub.overlapnormlist[[i]] = vosrub.overlapnorm
   
   ## Step 4b: Use modEvA::AUC to get AUC
   vosrub.overlap.auc <- AUC(obs = vosrub.test, pred = vosrub.overlapnorm)
@@ -4120,6 +5687,7 @@ save(vosrub.idmlist, file = "vosrub-idms.RData")
 ```
 
 ```{r vosrub ensemble}
+# Raw
 vosrub.overlap.ensemble <- raster(mean(rast(vosrub.overlaplist[c(1:100)])))
 vosrub.overlap.spdf <- as(vosrub.overlap.ensemble, "SpatialPixelsDataFrame")
 vosrub.overlap.df <- as.data.frame(vosrub.overlap.spdf)
@@ -4143,7 +5711,90 @@ vosrub.idm.plot <- ggplot() +
   scale_fill_viridis(option = "magma", 
                      limits = c(0, 1))
 ggsave("figures/vosrub-idm.png", vosrub.idm.plot, width = 6, height = 4, units = "in")
+
+# Normalized
+vosrub.overlapnorm.ensemble <- raster(mean(rast(vosrub.overlapnormlist[c(1:100)])))
+vosrub.overlapnorm.spdf <- as(vosrub.overlapnorm.ensemble, "SpatialPixelsDataFrame")
+vosrub.overlapnorm.df <- as.data.frame(vosrub.overlapnorm.spdf)
+
+vosrub.overlapnorm.plot <- ggplot() +
+  geom_tile(data = vosrub.overlapnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/vosrub-overlapnorm.png", vosrub.overlapnorm.plot, width = 6, height = 4, units = "in")
+
+vosrub.idmnorm.ensemble <- raster(mean(rast(vosrub.idmnormlist[c(1:100)])))
+vosrub.idmnorm.spdf <- as(vosrub.idmnorm.ensemble, "SpatialPixelsDataFrame")
+vosrub.idmnorm.df <- as.data.frame(vosrub.idmnorm.spdf)
+
+vosrub.idmnorm.plot <- ggplot() +
+  geom_tile(data = vosrub.idmnorm.df, aes(x = x, y = y, fill = mean)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_viridis(option = "magma", 
+                     limits = c(0, 1))
+ggsave("figures/normalized/vosrub-idmnorm.png", vosrub.idmnorm.plot, width = 6, height = 4, units = "in")
+
+# Threshold
+vosrub.overlap.tstar <- mean((vosrub.evaldf %>% filter(model == "overlap"))$tstar)
+vosrub.overlap.threshensemble <- clamp(vosrub.overlapnorm.ensemble, lower = vosrub.overlap.tstar, upper = 1, values = T)
+vosrub.overlap.threshensemble[vosrub.overlap.threshensemble > vosrub.overlap.tstar] = 1
+vosrub.overlap.threshensemble[vosrub.overlap.threshensemble <= vosrub.overlap.tstar] = 0
+
+vosrub.idm.tstar <- mean((vosrub.evaldf %>% filter(model == "IDM"))$tstar)
+vosrub.idm.threshensemble <- clamp(vosrub.idmnorm.ensemble, lower = vosrub.idm.tstar, upper = 1, values = T)
+vosrub.idm.threshensemble[vosrub.idm.threshensemble > vosrub.idm.tstar] = 10
+vosrub.idm.threshensemble[vosrub.idm.threshensemble <= vosrub.idm.tstar] = 0
+
+vosrub.threshold <- vosrub.overlap.threshensemble + vosrub.idm.threshensemble
+vosrub.thresh.spdf <- as(vosrub.threshold, "SpatialPixelsDataFrame")
+vosrub.thresh.df <- as.data.frame(vosrub.thresh.spdf) %>%
+  mutate(layer = as.factor(layer))
+
+vosrub.thresh.plot <- ggplot() +
+  geom_tile(data = vosrub.thresh.df, aes(x = x, y = y, fill = layer)) +
+  coord_cartesian(xlim = c(-130, -110), ylim = c(40, 50)) +
+  theme_map() +
+  scale_fill_manual(values = c("#000004",
+                                  "#721f81",
+                                  "#f1605d",
+                                  "#fcfdbf"),
+                    labels = c("N/A",
+                                  "Overlap",
+                                  "IDM",
+                                  "Overlap & IDM")) +
+  theme(legend.title = element_blank())
+ggsave("figures/normalized/vosrub-threshold.png", vosrub.thresh.plot, width = 6, height = 4, units = "in")
+
+
+## Calculate Threshold Areas
+for(i in 1:100){
+idm.thresh <- as(vosrub.idmthresh[[i]], "SpatRaster")
+idm.thresh[idm.thresh == 1] = 10
+overlap.thresh <- as(vosrub.overlapthresh[[i]], "SpatRaster")
+
+shared.thresh <- idm.thresh + overlap.thresh
+
+idm.area <- shared.thresh
+overlap.area <- shared.thresh
+
+idm.area[idm.area != 10] = NA
+overlap.area[overlap.area != 1] = NA
+
+area.allruns <- bind_rows(area.allruns,
+                     data.frame(run = i,
+                                int = "vosrub",
+                                idm = expanse(idm.area, unit = "km")$area,
+                                overlap = expanse(overlap.area, unit = "km")$area))
+}
 ```
+
+```{r final save}
+write.csv(area.allruns, file = "thresh-areas-all.csv")
+```
+
 
 # Session Info
 ```{r sessioninfo}
